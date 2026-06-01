@@ -13,7 +13,7 @@ static int push_compute(SimdTag<SimdType::AR_SIMD_TYPE>, size_t batchBegin, size
     auto& runStarts = data.runStarts;
 
     auto begin_idx = batchBegin * 64;
-    auto end_idx = std::min<size_t>(batchEnd + 64, entityCount);
+    auto end_idx = std::min<size_t>(batchEnd * 64, static_cast<size_t>(entityCount));
     auto batchCollisionCount = 0;
 
     for (int i = static_cast<int>(begin_idx); i < end_idx; ++i)
