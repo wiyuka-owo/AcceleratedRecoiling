@@ -14,7 +14,7 @@ configurations {
 }
 
 dependencies {
-    cppToolchain "com.wiyuka.env:AcceleratedRecoiling-third-party:toolchain_20260403_0@zip"
+    cppToolchain "com.wiyuka.env:AcceleratedRecoiling-third-party:toolchain_20260601_0@zip"
 }
 
 def zipUrl = "https://github.com/wiyuka0/AcceleratedRecoiling/releases/download/toolchain_20260328_0/AcceleratedRecoiling-third-party.zip"
