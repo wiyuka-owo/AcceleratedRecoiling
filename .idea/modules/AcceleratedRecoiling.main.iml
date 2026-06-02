@@ -9,19 +9,15 @@
     <facet type="minecraft" name="Minecraft">
       <configuration>
         <autoDetectTypes>
-          <platformType>MIXIN</platformType>
-          <platformType>NEOFORGE</platformType>
           <platformType>MCP</platformType>
+          <platformType>MIXIN</platformType>
+          <platformType>FORGE</platformType>
         </autoDetectTypes>
         <projectReimportVersion>1</projectReimportVersion>
       </configuration>
     </facet>
   </component>
   <component name="McpModuleSettings">
-    <option name="mappingFile" value="T:\acceleratedrecoiling\AcceleratedRecoiling\build\createMcpToSrg\output.tsrg" />
-    <option name="mcpVersion" value="official_1.20.1" />
-    <option name="minecraftVersion" value="1.20.1" />
-    <option name="platformVersion" value="47.4.10" />
-    <option name="srgType" value="TSRG" />
+    <option name="srgType" value="SRG" />
   </component>
 </module>
