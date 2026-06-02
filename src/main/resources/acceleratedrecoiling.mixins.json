@@ -6,7 +6,6 @@
   "mixins": [
     "EntityGetterMixin",
     "EntityMixin",
-    "FastTagCheckMixin",
     "LivingEntityMixin",
     "ServerLevelMixin"
   ],
