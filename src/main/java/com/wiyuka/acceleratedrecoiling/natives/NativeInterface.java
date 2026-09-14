@@ -114,16 +114,6 @@ public class NativeInterface {
         if (selectedBackend != BackendType.AUTO) {
             AcceleratedRecoiling.LOGGER.info("User requested backend via config: {}", selectedBackend.getDisplayName());
         }
-        if (selectedBackend == BackendType.AUTO) {
-            if (AVX2.hasAVX2()) {
-                selectedBackend = BackendType.FFM;
-            } else if (isVectorApiAvailable()) {
-                selectedBackend = BackendType.JAVA_SIMD;
-            } else {
-                selectedBackend = BackendType.JAVA;
-            }
-            AcceleratedRecoiling.LOGGER.info("Auto-selected backend: {}", selectedBackend.getDisplayName());
-        }
         initialize(selectedBackend);
     }
 
