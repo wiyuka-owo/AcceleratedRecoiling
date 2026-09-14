@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 public class JNIBackend implements CollisionEngine {
     private final Path libraryPath;
-    private CollisionConfig config = new CollisionConfig(32, 1, 4, 1);
+    private CollisionConfig config = new CollisionConfig(32, 1, 4, 1, 0);
     private static final AtomicLong maxSizeTouched = new AtomicLong(-1);
     private static volatile boolean isInitialized = false;
     private static boolean libraryLoaded = false;

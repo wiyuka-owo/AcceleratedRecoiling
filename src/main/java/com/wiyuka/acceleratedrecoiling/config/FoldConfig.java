@@ -20,6 +20,7 @@ public class FoldConfig {
     public static int densityWindow = 4;
     public static int densityThreshold = -1;
     public static int maxThreads = 1;
+    public static int gpuIndex = 0;
     public static String backend = "AUTO";
     private static final File CONFIG_FILE = new File("acceleratedRecoiling.json");
 
@@ -77,6 +78,7 @@ public class FoldConfig {
         if (configJson.has("densityWindow")) densityWindow = configJson.get("densityWindow").getAsInt();
         if (configJson.has("densityThreshold")) densityThreshold = configJson.get("densityThreshold").getAsInt();
         if (configJson.has("maxThreads")) maxThreads = configJson.get("maxThreads").getAsInt();
+        if (configJson.has("gpuIndex")) gpuIndex = configJson.get("gpuIndex").getAsInt();
         if (configJson.has("backend")) backend = configJson.get("backend").getAsString();
     }
 
@@ -89,6 +91,7 @@ public class FoldConfig {
         json.addProperty("densityWindow", densityWindow);
         json.addProperty("densityThreshold", densityThreshold);
         json.addProperty("maxThreads", maxThreads);
+        json.addProperty("gpuIndex", gpuIndex);
         json.addProperty("backend", backend);
         return json;
     }
@@ -102,6 +105,7 @@ public class FoldConfig {
         json.addProperty("densityWindow", 4);
         json.addProperty("densityThreshold", -1);
         json.addProperty("maxThreads", 1);
+        json.addProperty("gpuIndex", 0);
         json.addProperty("backend", "AUTO");
         return json;
     }

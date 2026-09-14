@@ -15,7 +15,7 @@ import java.util.stream.IntStream;
 
 public class JavaSimdCollisionEngine implements CollisionEngine {
     private static final AtomicLong maxSizeTouched = new AtomicLong(-1);
-    private CollisionConfig config = new CollisionConfig(32, 1, 4, 1);
+    private CollisionConfig config = new CollisionConfig(32, 1, 4, 1, 0);
 
     @Override
     public String getName() {

@@ -83,8 +83,8 @@ public class NativeInterface {
             try {
                 AcceleratedRecoiling.LOGGER.info("Attempting to load {} backend...", this.displayName);
                 CollisionEngine instance = loader.get();
-                instance.initialize();
                 instance.setConfig(currentConfig());
+                instance.initialize();
                 return instance;
             } catch (Throwable t) {
                 Throwable root = t;
@@ -166,7 +166,8 @@ public class NativeInterface {
                 FoldConfig.maxCollision,
                 FoldConfig.gridSize,
                 FoldConfig.densityWindow,
-                FoldConfig.maxThreads
+                FoldConfig.maxThreads,
+                FoldConfig.gpuIndex
         );
     }
 

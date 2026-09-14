@@ -46,7 +46,8 @@
    "maxCollision": 32,                 // 单个实体最大碰撞交互数
    "gridSize": 1,                      // 算法网格大小
    "densityWindow": 4,                 // 密度平滑窗口
-   "densityThreshold": -1              // 触发加速碰撞的周围实体密度阈值
+   "densityThreshold": -1,             // 触发加速碰撞的周围实体密度阈值
+   "gpuIndex": 0                       // 使用第几个 GPU（从 0 起），仅 GPU 后端有效
 }
 ```
 *注：若开启后性能不升反降，请尝试调低 `densityThreshold`。*

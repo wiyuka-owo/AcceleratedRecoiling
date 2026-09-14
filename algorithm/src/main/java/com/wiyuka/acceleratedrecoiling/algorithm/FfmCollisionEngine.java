@@ -19,7 +19,7 @@ import static java.lang.foreign.ValueLayout.JAVA_INT;
 
 public class FfmCollisionEngine implements CollisionEngine {
     private final Path libraryPath;
-    private CollisionConfig config = new CollisionConfig(32, 1, 4, 1);
+    private CollisionConfig config = new CollisionConfig(32, 1, 4, 1, 0);
     private static Linker linker;
     private static Arena nativeArena;
     private static MethodHandle pushMethodHandle = null;

@@ -46,7 +46,7 @@ import static org.jocl.CL.clSetKernelArg;
 import static org.jocl.CL.setExceptionsEnabled;
 
 public class GpuCollisionEngine implements CollisionEngine {
-    private CollisionConfig config = new CollisionConfig(32, 1, 4, 1);
+    private CollisionConfig config = new CollisionConfig(32, 1, 4, 1, 0);
     private static cl_context context;
     private static cl_program program;
     private static cl_device_id device;
@@ -327,33 +327,40 @@ public class GpuCollisionEngine implements CollisionEngine {
             }
             cl_platform_id[] platforms = new cl_platform_id[numPlatformsArray[0]];
             clGetPlatformIDs(platforms.length, platforms, null);
-            cl_platform_id targetPlatform = null;
-            cl_device_id targetDevice = null;
+            java.util.ArrayList<cl_platform_id> gpuPlatforms = new java.util.ArrayList<>();
+            java.util.ArrayList<cl_device_id> gpuDevices = new java.util.ArrayList<>();
             for (cl_platform_id platform : platforms) {
                 try {
                     int[] numDevicesArray = new int[1];
                     clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 0, null, numDevicesArray);
-
-                    if (numDevicesArray[0] > 0) {
-                        cl_device_id[] devices = new cl_device_id[numDevicesArray[0]];
-                        clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, devices.length, devices, null);
-
-                        targetPlatform = platform;
-                        targetDevice = devices[0];
-                        break;
+                    if (numDevicesArray[0] <= 0) {
+                        continue;
                     }
-                } catch (CLException e) {
+                    cl_device_id[] devices = new cl_device_id[numDevicesArray[0]];
+                    clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, devices.length, devices, null);
+                    for (cl_device_id found : devices) {
+                        gpuPlatforms.add(platform);
+                        gpuDevices.add(found);
+                    }
+                } catch (CLException ignored) {
                 }
             }
-            if (targetPlatform == null || targetDevice == null) {
+            if (gpuDevices.isEmpty()) {
                 throw new UnsupportedOperationException("No GPU found");
             }
-            long[] size = new long[1];
-            clGetDeviceInfo(targetDevice, CL_DEVICE_NAME, 0, null, size);
-            byte[] nameBuffer = new byte[(int) size[0]];
-            clGetDeviceInfo(targetDevice, CL_DEVICE_NAME, nameBuffer.length, Pointer.to(nameBuffer), null);
-            String gpuName = new String(nameBuffer, 0, nameBuffer.length - 1).trim();
-            logger.log(Level.INFO, "OpenCL Backend Initialized. Using GPU: {0}", gpuName);
+            int requested = Math.max(0, this.config.gpuIndex());
+            int selected = requested;
+            if (selected >= gpuDevices.size()) {
+                selected = gpuDevices.size() - 1;
+                logger.log(Level.WARNING, "gpuIndex {0} is out of range (0-{1}), using {2}",
+                        requested, gpuDevices.size() - 1, selected);
+            }
+            for (int i = 0; i < gpuDevices.size(); i++) {
+                logger.log(Level.INFO, "GPU {0}: {1}", i, deviceName(gpuDevices.get(i)));
+            }
+            cl_platform_id targetPlatform = gpuPlatforms.get(selected);
+            cl_device_id targetDevice = gpuDevices.get(selected);
+            logger.log(Level.INFO, "OpenCL Backend Initialized. Using GPU {0}: {1}", selected, deviceName(targetDevice));
 
             device = targetDevice;
 
@@ -370,6 +377,14 @@ public class GpuCollisionEngine implements CollisionEngine {
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize OpenCL GPU Backend", e);
         }
+    }
+
+    private static String deviceName(cl_device_id targetDevice) {
+        long[] size = new long[1];
+        clGetDeviceInfo(targetDevice, CL_DEVICE_NAME, 0, null, size);
+        byte[] nameBuffer = new byte[(int) size[0]];
+        clGetDeviceInfo(targetDevice, CL_DEVICE_NAME, nameBuffer.length, Pointer.to(nameBuffer), null);
+        return new String(nameBuffer, 0, nameBuffer.length - 1).trim();
     }
 
     @Override

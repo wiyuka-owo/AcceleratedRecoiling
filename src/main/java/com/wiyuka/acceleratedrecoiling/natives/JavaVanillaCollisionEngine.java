@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.function.Predicate;
 
 public class JavaVanillaCollisionEngine implements CollisionEngine {
-    private CollisionConfig config = new CollisionConfig(32, 1, 4, 1);
+    private CollisionConfig config = new CollisionConfig(32, 1, 4, 1, 0);
     private final IdentityHashMap<Entity, ObjectArrayList<Entity>> neighborLists = new IdentityHashMap<>();
     private final ObjectOpenHashSet<Entity> bakeSeen = new ObjectOpenHashSet<>();
     private final ArrayList<Entity> queryOut = new ArrayList<>();

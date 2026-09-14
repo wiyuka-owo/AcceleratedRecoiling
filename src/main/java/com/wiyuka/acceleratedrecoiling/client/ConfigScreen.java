@@ -26,6 +26,7 @@ public class ConfigScreen extends Screen {
     private final int snapDensityWindow;
     private final int snapDensityThreshold;
     private final int snapMaxThreads;
+    private final int snapGpuIndex;
     private final String snapBackend;
 
     private CycleButton<Boolean> enableEntityCollisionButton;
@@ -35,6 +36,7 @@ public class ConfigScreen extends Screen {
     private EditBox densityWindowBox;
     private EditBox densityThresholdBox;
     private EditBox maxThreadsBox;
+    private EditBox gpuIndexBox;
     private CycleButton<String> backendButton;
 
     public ConfigScreen(Screen parent) {
@@ -47,6 +49,7 @@ public class ConfigScreen extends Screen {
         this.snapDensityWindow = FoldConfig.densityWindow;
         this.snapDensityThreshold = FoldConfig.densityThreshold;
         this.snapMaxThreads = FoldConfig.maxThreads;
+        this.snapGpuIndex = FoldConfig.gpuIndex;
         this.snapBackend = FoldConfig.backend;
     }
 
@@ -84,6 +87,8 @@ public class ConfigScreen extends Screen {
         addLabeled(rows, "densityThreshold", this.densityThresholdBox);
         this.maxThreadsBox = intBox(FoldConfig.maxThreads);
         addLabeled(rows, "maxThreads", this.maxThreadsBox);
+        this.gpuIndexBox = intBox(FoldConfig.gpuIndex);
+        addLabeled(rows, "gpuIndex", this.gpuIndexBox);
 
         this.layout.addToContents(grid);
 
@@ -126,12 +131,15 @@ public class ConfigScreen extends Screen {
         FoldConfig.densityWindow = parseInt(this.densityWindowBox, this.snapDensityWindow);
         FoldConfig.densityThreshold = parseInt(this.densityThresholdBox, this.snapDensityThreshold);
         FoldConfig.maxThreads = parseInt(this.maxThreadsBox, this.snapMaxThreads);
+        FoldConfig.gpuIndex = parseInt(this.gpuIndexBox, this.snapGpuIndex);
         String newBackend = this.backendButton.getValue();
         boolean backendChanged = !newBackend.equalsIgnoreCase(this.snapBackend);
+        boolean gpuIndexChanged = FoldConfig.gpuIndex != this.snapGpuIndex;
         FoldConfig.backend = newBackend;
         FoldConfig.saveConfig();
         NativeInterface.applyConfig();
-        if (backendChanged && NativeInterface.isInitialized()) {
+        if ((backendChanged || (gpuIndexChanged && "GPU".equalsIgnoreCase(newBackend)))
+                && NativeInterface.isInitialized()) {
             NativeInterface.destroy();
         }
         this.minecraft.setScreen(this.parent);
@@ -145,6 +153,7 @@ public class ConfigScreen extends Screen {
         FoldConfig.densityWindow = this.snapDensityWindow;
         FoldConfig.densityThreshold = this.snapDensityThreshold;
         FoldConfig.maxThreads = this.snapMaxThreads;
+        FoldConfig.gpuIndex = this.snapGpuIndex;
         FoldConfig.backend = this.snapBackend;
         this.minecraft.setScreen(this.parent);
     }

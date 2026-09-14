@@ -9,7 +9,7 @@ public class JavaCollisionEngine implements CollisionEngine {
     private static final int BITS_X = 36;
     private static final long MASK_X = (1L << BITS_X) - 1L;
 
-    private CollisionConfig config = new CollisionConfig(32, 1, 4, 1);
+    private CollisionConfig config = new CollisionConfig(32, 1, 4, 1, 0);
     private EntityData mem;
     private int[] outputA;
     private int[] outputB;
