@@ -1,25 +1,19 @@
-package com.wiyuka.acceleratedrecoiling.natives;
-
-import com.wiyuka.acceleratedrecoiling.config.FoldConfig;
+package com.wiyuka.acceleratedrecoiling.algorithm;
 
 import java.util.Arrays;
 import java.util.stream.IntStream;
 
-public class JavaBackend implements INativeBackend {
+public class JavaCollisionEngine implements CollisionEngine {
     private static final double WORLD_OFFSET = 50000000.0;
     private static final int SCALE = 64;
     private static final int BITS_X = 36;
     private static final long MASK_X = (1L << BITS_X) - 1L;
 
-    private int maxCollision = FoldConfig.maxCollision;
-    private int gridSize = FoldConfig.gridSize;
-    private int densityWindow = FoldConfig.densityWindow;
-
+    private CollisionConfig config = new CollisionConfig(32, 1, 4, 1);
     private EntityData mem;
     private int[] outputA;
     private int[] outputB;
     private float[] densityBuf;
-
     private final PushResultJava resultWrapper = new PushResultJava();
 
     @Override
@@ -34,8 +28,8 @@ public class JavaBackend implements INativeBackend {
     }
 
     @Override
-    public void applyConfig() {
-
+    public void setConfig(CollisionConfig config) {
+        this.config = config;
     }
 
     @Override
@@ -47,15 +41,15 @@ public class JavaBackend implements INativeBackend {
     }
 
     @Override
-    public PushResult push(double[] locations, double[] aabb, int[] resultSizeOut) {
-        if (aabb == null || aabb.length < 12 || mem == null || outputA == null || outputB == null ||  densityBuf == null) {
+    public CollisionResult push(double[] locations, double[] aabb, int[] resultSizeOut) {
+        if (aabb == null || aabb.length < 12 || mem == null || outputA == null || outputB == null || densityBuf == null) {
             resultSizeOut[0] = 0;
             return resultWrapper;
         }
 
         int entityCount = aabb.length / 6;
-        int K = this.maxCollision;
-        double invGridSize = 1.0 / this.gridSize;
+        int K = this.config.maxCollision();
+        double invGridSize = 1.0 / this.config.gridSize();
 
         ensureOutputSize(entityCount);
         mem.ensureSize(entityCount);
@@ -113,7 +107,7 @@ public class JavaBackend implements INativeBackend {
             mem.sortedMaxZ[i] = mem.quantizedMaxZ[originalID];
         });
 
-        final int WINDOW = this.densityWindow;
+        final int WINDOW = this.config.densityWindow();
         final float EPSILON_DISTANCE = 0.1f;
         IntStream.range(0, mem.runStartsCount - 1).parallel().forEach(grid -> {
             int startIdx = mem.runStarts[grid];
@@ -199,7 +193,7 @@ public class JavaBackend implements INativeBackend {
     }
 
     private void ensureOutputSize(int entityCount) {
-        int requiredCollisionSize = entityCount * maxCollision;
+        int requiredCollisionSize = entityCount * config.maxCollision();
         if (outputA == null || outputA.length < requiredCollisionSize) {
             int newSize = Math.max(requiredCollisionSize, outputA == null ? 0 : (int) (outputA.length * 1.5));
             outputA = new int[newSize];
@@ -240,8 +234,12 @@ public class JavaBackend implements INativeBackend {
                 dstVals[destIdx] = srcVals[i];
             }
 
-            long[] tempKeys = srcKeys; srcKeys = dstKeys; dstKeys = tempKeys;
-            int[] tempVals = srcVals; srcVals = dstVals; dstVals = tempVals;
+            long[] tempKeys = srcKeys;
+            srcKeys = dstKeys;
+            dstKeys = tempKeys;
+            int[] tempVals = srcVals;
+            srcVals = dstVals;
+            dstVals = tempVals;
         }
 
         if (srcKeys == keysBuf) {
@@ -252,24 +250,19 @@ public class JavaBackend implements INativeBackend {
 
     private static class EntityData {
         int currentSize = -1;
-
         long[] sortKeys;
         int[] originalIds;
         long[] sortKeyBuffer;
         int[] originalIdBuffer;
-
         int[] quantizedMinX, quantizedMaxX;
         int[] quantizedMinY, quantizedMaxY;
         int[] quantizedMinZ, quantizedMaxZ;
-
         int[] sortedMinX, sortedMaxX;
         int[] sortedMinY, sortedMaxY;
         int[] sortedMinZ, sortedMaxZ;
-
         int[] runIndexPerItem;
         int[] runStarts;
         int runStartsCount;
-
         int[] collisionCounts;
 
         public void ensureSize(int n) {
@@ -280,13 +273,19 @@ public class JavaBackend implements INativeBackend {
                 sortKeyBuffer = new long[newSize];
                 originalIdBuffer = new int[newSize];
 
-                quantizedMinX = new int[newSize]; quantizedMaxX = new int[newSize];
-                quantizedMinY = new int[newSize]; quantizedMaxY = new int[newSize];
-                quantizedMinZ = new int[newSize]; quantizedMaxZ = new int[newSize];
+                quantizedMinX = new int[newSize];
+                quantizedMaxX = new int[newSize];
+                quantizedMinY = new int[newSize];
+                quantizedMaxY = new int[newSize];
+                quantizedMinZ = new int[newSize];
+                quantizedMaxZ = new int[newSize];
 
-                sortedMinX = new int[newSize]; sortedMaxX = new int[newSize];
-                sortedMinY = new int[newSize]; sortedMaxY = new int[newSize];
-                sortedMinZ = new int[newSize]; sortedMaxZ = new int[newSize];
+                sortedMinX = new int[newSize];
+                sortedMaxX = new int[newSize];
+                sortedMinY = new int[newSize];
+                sortedMaxY = new int[newSize];
+                sortedMinZ = new int[newSize];
+                sortedMaxZ = new int[newSize];
 
                 runIndexPerItem = new int[newSize];
                 runStarts = new int[newSize + 2];
@@ -297,8 +296,7 @@ public class JavaBackend implements INativeBackend {
         }
     }
 
-    private class PushResultJava implements PushResult {
-
+    private class PushResultJava implements CollisionResult {
         @Override
         public int getA(int index) {
             return outputA[index];

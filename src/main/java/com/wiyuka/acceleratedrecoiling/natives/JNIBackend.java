@@ -1,36 +1,37 @@
 package com.wiyuka.acceleratedrecoiling.natives;
 
+import com.wiyuka.acceleratedrecoiling.algorithm.CollisionConfig;
+import com.wiyuka.acceleratedrecoiling.algorithm.CollisionEngine;
+import com.wiyuka.acceleratedrecoiling.algorithm.CollisionResult;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.wiyuka.acceleratedrecoiling.AcceleratedRecoiling;
-import com.wiyuka.acceleratedrecoiling.config.FoldConfig;
-import org.slf4j.Logger;
-
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.lang.System.Logger;
+import java.lang.System.Logger.Level;
+import java.nio.file.Path;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
-public class JNIBackend implements INativeBackend {
-
+public class JNIBackend implements CollisionEngine {
+    private final Path libraryPath;
+    private CollisionConfig config = new CollisionConfig(32, 1, 4, 1);
     private static final AtomicLong maxSizeTouched = new AtomicLong(-1);
+    private static volatile boolean isInitialized = false;
+    private static boolean libraryLoaded = false;
+
+    public JNIBackend(Path libraryPath) {
+        this.libraryPath = libraryPath;
+    }
 
     private static native long createCtx();
+
     private static native void destroyCtx(long ctxPtr);
+
     private static native long createCfg(int maxCollision, int gridSize, int densityWindow, int maxThreads);
+
     private static native void updateCfg(long cfgPtr, int maxCollision, int gridSize, int densityWindow, int maxThreads);
+
     private static native void destroyCfg(long cfgPtr);
+
     private static native int push(double[] aabbs, int[] outputA, int[] outputB, int count, float[] densityBuf, long ctxPtr, long cfgPtr);
 
     @Override
@@ -38,12 +39,13 @@ public class JNIBackend implements INativeBackend {
         return "JNI";
     }
 
-    static class PushResultJNI implements PushResult {
+    static class PushResultJNI implements CollisionResult {
         private int[] arrayA;
         private int[] arrayB;
         private float[] arrayDensity;
 
-        private PushResultJNI() {}
+        private PushResultJNI() {
+        }
 
         void update(int[] a, int[] b, float[] density) {
             this.arrayA = a;
@@ -52,43 +54,53 @@ public class JNIBackend implements INativeBackend {
         }
 
         @Override
-        public int getA(int index) { return arrayA[index]; }
+        public int getA(int index) {
+            return arrayA[index];
+        }
 
         @Override
-        public int getB(int index) { return arrayB[index]; }
+        public int getB(int index) {
+            return arrayB[index];
+        }
 
         @Override
-        public float getDensity(int index) { return arrayDensity[index]; }
+        public float getDensity(int index) {
+            return arrayDensity[index];
+        }
 
         @Override
-        public void copyATo(int[] dest, int length) { System.arraycopy(arrayA, 0, dest, 0, length); }
+        public void copyATo(int[] dest, int length) {
+            System.arraycopy(arrayA, 0, dest, 0, length);
+        }
 
         @Override
-        public void copyBTo(int[] dest, int length) { System.arraycopy(arrayB, 0, dest, 0, length); }
+        public void copyBTo(int[] dest, int length) {
+            System.arraycopy(arrayB, 0, dest, 0, length);
+        }
 
         @Override
-        public void copyDensityTo(float[] dest, int length) { System.arraycopy(arrayDensity, 0, dest, 0, length); }
+        public void copyDensityTo(float[] dest, int length) {
+            System.arraycopy(arrayDensity, 0, dest, 0, length);
+        }
     }
 
-    private static class ThreadState {
+    private class ThreadState {
         int[] bufA;
         int[] bufB;
         float[] densityBuf;
-
         long contextPtr = 0;
         long configPtr = 0;
         int currentSize = -1;
-
         final PushResultJNI resultWrapper = new PushResultJNI();
 
         ThreadState() {
             try {
                 contextPtr = createCtx();
                 configPtr = createCfg(
-                        FoldConfig.maxCollision,
-                        FoldConfig.gridSize,
-                        FoldConfig.densityWindow,
-                        FoldConfig.maxThreads
+                        config.maxCollision(),
+                        config.gridSize(),
+                        config.densityWindow(),
+                        config.maxThreads()
                 );
             } catch (Throwable e) {
                 throw new RuntimeException("Failed to create JNI native context for thread", e);
@@ -109,12 +121,21 @@ public class JNIBackend implements INativeBackend {
         }
 
         void destroy() {
+            Logger logger = System.getLogger("acceleratedrecoiling.algorithm");
             if (contextPtr != 0) {
-                try { destroyCtx(contextPtr); } catch (Throwable e) { AcceleratedRecoiling.LOGGER.error("Failed to destroy ctx", e); }
+                try {
+                    destroyCtx(contextPtr);
+                } catch (Throwable e) {
+                    logger.log(Level.ERROR, "Failed to destroy ctx", e);
+                }
                 contextPtr = 0;
             }
             if (configPtr != 0) {
-                try { destroyCfg(configPtr); } catch (Throwable e) { AcceleratedRecoiling.LOGGER.error("Failed to destroy cfg", e); }
+                try {
+                    destroyCfg(configPtr);
+                } catch (Throwable e) {
+                    logger.log(Level.ERROR, "Failed to destroy cfg", e);
+                }
                 configPtr = 0;
             }
             bufA = null;
@@ -123,22 +144,24 @@ public class JNIBackend implements INativeBackend {
         }
     }
 
-    private static final Set<ThreadState> ALL_THREAD_STATES = ConcurrentHashMap.newKeySet();
-    private static final ThreadLocal<ThreadState> THREAD_STATE = ThreadLocal.withInitial(() -> {
+    private final Set<ThreadState> allThreadStates = ConcurrentHashMap.newKeySet();
+    private final ThreadLocal<ThreadState> threadState = ThreadLocal.withInitial(() -> {
         ThreadState state = new ThreadState();
-        ALL_THREAD_STATES.add(state);
+        allThreadStates.add(state);
         return state;
     });
 
     @Override
-    public void applyConfig() {
-        if (!ParallelAABB.isInitialized) return;
-        for (ThreadState state : ALL_THREAD_STATES) {
+    public void setConfig(CollisionConfig config) {
+        this.config = config;
+        if (!isInitialized) return;
+        Logger logger = System.getLogger("acceleratedrecoiling.algorithm");
+        for (ThreadState state : allThreadStates) {
             if (state.configPtr != 0) {
                 try {
-                    updateCfg(state.configPtr, FoldConfig.maxCollision, FoldConfig.gridSize, FoldConfig.densityWindow, FoldConfig.maxThreads);
+                    updateCfg(state.configPtr, config.maxCollision(), config.gridSize(), config.densityWindow(), config.maxThreads());
                 } catch (Throwable e) {
-                    AcceleratedRecoiling.LOGGER.error("Failed to update JNI native config", e);
+                    logger.log(Level.ERROR, "Failed to update JNI native config", e);
                 }
             }
         }
@@ -146,25 +169,25 @@ public class JNIBackend implements INativeBackend {
 
     @Override
     public void destroy() {
-        if (!ParallelAABB.isInitialized) return;
-        ParallelAABB.isInitialized = false;
+        if (!isInitialized) return;
+        isInitialized = false;
 
-        for (ThreadState state : ALL_THREAD_STATES) {
+        for (ThreadState state : allThreadStates) {
             state.destroy();
         }
-        ALL_THREAD_STATES.clear();
+        allThreadStates.clear();
         maxSizeTouched.set(-1);
     }
 
     @Override
-    public PushResult push(double[] locations, double[] aabb, int[] resultSizeOut) {
-        if (!ParallelAABB.isInitialized) return null;
+    public CollisionResult push(double[] locations, double[] aabb, int[] resultSizeOut) {
+        if (!isInitialized) return null;
 
-        ThreadState state = THREAD_STATE.get();
+        ThreadState state = threadState.get();
         if (state.contextPtr == 0) return null;
 
         int count = locations.length / 3;
-        int resultSize = locations.length * FoldConfig.maxCollision;
+        int resultSize = locations.length * config.maxCollision();
         maxSizeTouched.updateAndGet(current -> Math.max(current, count));
 
         PushResultJNI collisionPairs = state.reallocOutputBuf(resultSize);
@@ -191,35 +214,19 @@ public class JNIBackend implements INativeBackend {
 
     @Override
     public void initialize() {
-        Logger logger = AcceleratedRecoiling.LOGGER;
-        String dllPath = "";
-        String dllName = "AcceleratedRecoiling";
-        String fullDllName = System.mapLibraryName(dllName);
-
-        String resourcePath = NativeInterface.getPlatformNativePath() + fullDllName;
-
-        try (InputStream dllStream = AcceleratedRecoiling.class.getResourceAsStream(resourcePath)) {
-            if (dllStream == null) {
-                throw new FileNotFoundException("Cannot find " + fullDllName + " in resources at path: " + resourcePath);
+        if (isInitialized) return;
+        Logger logger = System.getLogger("acceleratedrecoiling.algorithm");
+        String dllPath = libraryPath.toAbsolutePath().toString();
+        if (!libraryLoaded) {
+            try {
+                System.load(dllPath);
+                libraryLoaded = true;
+                logger.log(Level.INFO, "Loaded dll: {0}", dllPath);
+            } catch (UnsatisfiedLinkError e) {
+                throw new RuntimeException("Failed to load JNI library", e);
             }
-            File tempDll = File.createTempFile(UUID.randomUUID() + "_acceleratedRecoiling_", "_" + fullDllName);
-            tempDll.deleteOnExit();
-            dllPath = tempDll.getAbsolutePath();
-            try (OutputStream out = new FileOutputStream(tempDll)) {
-                dllStream.transferTo(out);
-                logger.info("Extracted JNI native library from {} to temp: {}", resourcePath, dllPath);
-            }
-        } catch (IOException e) {
-            throw new RuntimeException("JNI library load failed: " + e.getMessage(), e);
         }
-
-        try {
-            System.load(dllPath);
-            logger.info("Loaded dll: " + dllPath);
-        } catch (UnsatisfiedLinkError e) {
-            throw new RuntimeException("Failed to load JNI library", e);
-        }
-        logger.info("JNI acceleratedRecoiling initialized.");
+        isInitialized = true;
+        logger.log(Level.INFO, "JNI acceleratedRecoiling initialized.");
     }
-
 }

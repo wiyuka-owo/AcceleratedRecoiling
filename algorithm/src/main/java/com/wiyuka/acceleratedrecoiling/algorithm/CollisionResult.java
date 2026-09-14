@@ -1,14 +1,11 @@
-package com.wiyuka.acceleratedrecoiling.natives;
+package com.wiyuka.acceleratedrecoiling.algorithm;
 
-
-public interface PushResult {
-
+public interface CollisionResult {
     int getA(int index);
 
     int getB(int index);
 
     float getDensity(int index);
-
 
     void copyATo(int[] dest, int length);
 

@@ -2,7 +2,6 @@ package com.wiyuka.acceleratedrecoiling.mixin;
 
 import com.wiyuka.acceleratedrecoiling.api.ICustomData;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
@@ -58,8 +57,8 @@ public abstract class EntityMixin implements ICustomData {
     @Shadow
     private Vec3 position;
 
-
-    @Shadow public abstract boolean isRemoved();
+    @Shadow
+    public abstract boolean isRemoved();
 
     @Override
     public final void extractionPosition(double[] doubleArray, int offset) {
@@ -76,16 +75,8 @@ public abstract class EntityMixin implements ICustomData {
         this.bbMinX = bb.minX;
         this.bbMinY = bb.minY;
         this.bbMinZ = bb.minZ;
-        this.bbMaxX = bb.maxX;
-        this.bbMaxY = bb.maxY;
-        this.bbMaxZ = bb.maxZ;
-    }
-
-//    @Inject(
-//            method = "onRemoval",
-//            at = @At("TAIL")
-//    )
-//    private void onOnRemoval(Entity.RemovalReason r, CallbackInfo ci) {
-//        NativeIDManager.unregister((Entity) (Object) this);
-//    }
+    this.bbMaxX = bb.maxX;
+    this.bbMaxY = bb.maxY;
+    this.bbMaxZ = bb.maxZ;
+}
 }

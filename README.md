@@ -3,7 +3,7 @@
 加速碰撞是一个专注于优化服务端实体碰撞逻辑的模组。它利用 FFM (Foreign Function & Memory) API/JNI 接管实体 AABB 碰撞检测，将高密集计算压力转移至 C++ 原生库，从而显著提升服务器性能。
 该项目由[加速碰撞](https://github.com/wiyuka0/AcceleratedRecoilingNative)提供支持。
 
-**本模组目前为实验性质，实体挤压表现与原版不完全一致。请务必在做好存档备份的前提下谨慎使用。如果在意原版特性还原程度，请切换至Java Vanilla后端**
+**本模组目前为实验性质，非JavaVanilla的后端的实体挤压表现与原版不完全一致。请务必在做好存档备份的前提下谨慎使用，或切换为JavaVanilla后端。**
 
 官方交流群：1023713677
 
@@ -13,20 +13,20 @@
 *   **算法优化**：引入效率更高的碰撞算法，避免了原版 <math>O(N^2)</math> 复杂度的实体遍历，降低 CPU 负担。
 *   **阈值触发**：只有当局部实体密度达到设定阈值时才会使用 C++ 加速算法，保证常规游戏场景下的稳定与原版体验。
 *   **多端支持**：同时包含Windows/Linux/MacOS的运行库，未来版本将支持arm64
-*   **动态后端选择机制**: 同时包含多个后端并自动选择当前可以应用且效率最高的后端
+*   **动态后端选择机制**: 同时包含多个后端；`AUTO` 优先尝试 Java Vanilla，失败再按 GPU / FFM / JNI / Java SIMD / Java 回退
 
 
 | 后端 | 实现说明 | 要求 | 性能 (预期) | 状态 |
 | :--- | :--- | :--- | :--- | :--- |
-| **GPU** | 使用 GPU 算法加速碰撞 | 需图形硬件支持 | 最高 | 可用 |
-| **FFM** | 使用 FFM API 与 C++ 层进行通信 | 需要使用 JDK 21或以上的Java版本启动游戏 | 非常高 | 可用 |
-| **JNI** | 使用 JNI 与 C++ 层进行通信 | 无 | 非常高 | 可用 |
-| **Java SIMD** | 使用加速碰撞的 Java VectorAPI 算法 | 需添加启动参数 | 高 | 可用 |
+| **GPU** | 使用 GPU 算法加速碰撞 | 需图形硬件支持 | 良好 | 可用 |
+| **FFM** | 使用 FFM API 与 C++ 层进行通信 | 需要使用 JDK 21或以上的Java版本启动游戏 | 良好 | 可用 |
+| **JNI** | 使用 JNI 与 C++ 层进行通信 | 无 | 良好 | 可用 |
+| **Java SIMD** | 使用加速碰撞的 Java VectorAPI 算法 | 需添加启动参数 | 良好 | 可用 |
 | **Java** | 使用加速碰撞的 Java 原生算法 | 无 | 良好 | 可用 |
-| **Java Vanilla** | 在原版的实体遍历下直接修改实体碰撞筛选逻辑（原版特性还原程度最高） | 无 | 偏差 | 可用 |
+| **Java Vanilla** | 使用网格加速查找，嵌入原版实体计算流程 | 无 | 最高 | 可用 |
 | **Vanilla** | 原版的碰撞逻辑 | 无 | 最差 | - |
 
-如果需要手动切换后端，请在游戏启动时添加参数`-Dacceleratedrecoiling.backend=后端名称`
+如果需要手动切换后端，请在 `acceleratedRecoiling.json` 中设置 `backend`，可选 `AUTO`、`GPU`、`FFM`、`JNI`、`JAVA_SIMD`、`JAVA`、`JAVA_VANILLA`。
 
 ## 环境要求与前置
 
@@ -40,12 +40,13 @@
 **默认配置及说明：**
 ```json
 {
+   "backend": "AUTO",                  // 后端：AUTO / GPU / FFM / JNI / JAVA_SIMD / JAVA / JAVA_VANILLA(首选)
    "enableEntityCollision": true,      // 是否启用实体挤压优化
    "enableEntityGetterOptimization": true, // 启用EntityGetter接口优化(暂时无效)
    "maxCollision": 32,                 // 单个实体最大碰撞交互数
    "gridSize": 1,                      // 算法网格大小
    "densityWindow": 4,                 // 密度平滑窗口
-   "densityThreshold": 16              // 触发加速碰撞的周围实体密度阈值
+   "densityThreshold": -1              // 触发加速碰撞的周围实体密度阈值
 }
 ```
 *注：若开启后性能不升反降，请尝试调低 `densityThreshold`。*
@@ -77,6 +78,9 @@
 * [Create](https://github.com/Creators-of-Create/Create)
 * [Valkyrien-Skies-2](https://github.com/ValkyrienSkies/Valkyrien-Skies-2) <br>
 等多个大型模组。如果发现有不兼容的模组，请在本仓库提交Issue。
+
+**Q: 我应该自行切换到其他后端吗？** <br>
+**A:** 目前来说绝对不要....至少等我找到问题在哪....
 
 **Q: FFM 是Java 21的预览功能，我是否应该使用Java 21+启动游戏？** <br>
 **A:** 如果你的游戏版本是*1.21.1*以上，那么是的，但这是**1.21.1**版本本身需要**Java 21**来运行。 <br>

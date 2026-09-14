@@ -23,12 +23,12 @@ public class AVX2 {
             String avxValue = mxBean.getVMOption("UseAVX").getValue();
             int avxLevel = Integer.parseInt(avxValue);
             hasAVX2Cache = (avxLevel >= 2);
-
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
         return hasAVX2Cache;
     }
+
     public static boolean hasAVX2() {
         try {
             return hasAVX2JMX();
@@ -36,6 +36,7 @@ public class AVX2 {
             return hasAVX2Java();
         }
     }
+
     private static boolean hasAVX2Java() {
         Process process = null;
         try {
@@ -65,7 +66,6 @@ public class AVX2 {
                 process.destroy();
             }
         }
-
         return false;
     }
 }

@@ -1,28 +1,59 @@
-package com.wiyuka.acceleratedrecoiling.natives;
+package com.wiyuka.acceleratedrecoiling.algorithm;
 
-import com.wiyuka.acceleratedrecoiling.AcceleratedRecoiling;
-import com.wiyuka.acceleratedrecoiling.config.FoldConfig;
-import org.jocl.*;
-import org.slf4j.Logger;
+import org.jocl.CLException;
+import org.jocl.Pointer;
+import org.jocl.Sizeof;
+import org.jocl.cl_command_queue;
+import org.jocl.cl_context;
+import org.jocl.cl_context_properties;
+import org.jocl.cl_device_id;
+import org.jocl.cl_kernel;
+import org.jocl.cl_mem;
+import org.jocl.cl_platform_id;
+import org.jocl.cl_program;
 
+import java.lang.System.Logger;
+import java.lang.System.Logger.Level;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
-import static org.jocl.CL.*;
+import static org.jocl.CL.CL_CONTEXT_PLATFORM;
+import static org.jocl.CL.CL_DEVICE_NAME;
+import static org.jocl.CL.CL_DEVICE_TYPE_GPU;
+import static org.jocl.CL.CL_MEM_READ_ONLY;
+import static org.jocl.CL.CL_MEM_READ_WRITE;
+import static org.jocl.CL.CL_MEM_WRITE_ONLY;
+import static org.jocl.CL.CL_TRUE;
+import static org.jocl.CL.clBuildProgram;
+import static org.jocl.CL.clCreateBuffer;
+import static org.jocl.CL.clCreateCommandQueueWithProperties;
+import static org.jocl.CL.clCreateContext;
+import static org.jocl.CL.clCreateKernel;
+import static org.jocl.CL.clCreateProgramWithSource;
+import static org.jocl.CL.clEnqueueNDRangeKernel;
+import static org.jocl.CL.clEnqueueReadBuffer;
+import static org.jocl.CL.clEnqueueWriteBuffer;
+import static org.jocl.CL.clGetDeviceIDs;
+import static org.jocl.CL.clGetDeviceInfo;
+import static org.jocl.CL.clGetPlatformIDs;
+import static org.jocl.CL.clReleaseCommandQueue;
+import static org.jocl.CL.clReleaseContext;
+import static org.jocl.CL.clReleaseKernel;
+import static org.jocl.CL.clReleaseMemObject;
+import static org.jocl.CL.clReleaseProgram;
+import static org.jocl.CL.clSetKernelArg;
+import static org.jocl.CL.setExceptionsEnabled;
 
-public class GPUBackend implements INativeBackend {
-
+public class GpuCollisionEngine implements CollisionEngine {
+    private CollisionConfig config = new CollisionConfig(32, 1, 4, 1);
     private static cl_context context;
     private static cl_program program;
     private static cl_device_id device;
-
     private static final AtomicLong maxSizeTouched = new AtomicLong(-1);
     private static volatile boolean isInitialized = false;
-
     private static final double CELL_SIZE = 2.5;
     private static final int TABLE_SIZE = 262139;
-    private static final int INVALID_INDEX = -1;
 
     private static final String KERNEL_SOURCE =
             """
@@ -129,30 +160,55 @@ public class GPUBackend implements INativeBackend {
                         density[real_id] = (float)overlapCount; 
                     }
                     """;
-    @Override
-    public String getName() { return "GPU"; }
 
-    static class PushResultJOCL implements PushResult {
+    @Override
+    public String getName() {
+        return "GPU";
+    }
+
+    static class PushResultJOCL implements CollisionResult {
         int[] arrA, arrB;
         float[] arrDensity;
-        @Override public int getA(int index) { return arrA[index]; }
-        @Override public int getB(int index) { return arrB[index]; }
-        @Override public float getDensity(int index) { return arrDensity[index]; }
-        @Override public void copyATo(int[] dest, int length) { System.arraycopy(arrA, 0, dest, 0, length); }
-        @Override public void copyBTo(int[] dest, int length) { System.arraycopy(arrB, 0, dest, 0, length); }
-        @Override public void copyDensityTo(float[] dest, int length) { System.arraycopy(arrDensity, 0, dest, 0, length); }
+
+        @Override
+        public int getA(int index) {
+            return arrA[index];
+        }
+
+        @Override
+        public int getB(int index) {
+            return arrB[index];
+        }
+
+        @Override
+        public float getDensity(int index) {
+            return arrDensity[index];
+        }
+
+        @Override
+        public void copyATo(int[] dest, int length) {
+            System.arraycopy(arrA, 0, dest, 0, length);
+        }
+
+        @Override
+        public void copyBTo(int[] dest, int length) {
+            System.arraycopy(arrB, 0, dest, 0, length);
+        }
+
+        @Override
+        public void copyDensityTo(float[] dest, int length) {
+            System.arraycopy(arrDensity, 0, dest, 0, length);
+        }
     }
 
     private static class ThreadState {
+        int epoch;
         cl_command_queue commandQueue;
         cl_kernel kComputeHash, kResetGrid, kBuildGrid, kDetect;
-
         int currentEntityCap = -1, currentCollisionCap = -1;
         int[] cpuHashes, cpuIndices, tempKeys, tempValues;
-
         cl_mem memAABB, memHashes, memIndices, memOutA, memOutB, memDensity, memCounter;
         cl_mem memCellStarts, memCellEnds;
-
         final PushResultJOCL resultWrapper = new PushResultJOCL();
 
         ThreadState() {
@@ -164,40 +220,43 @@ public class GPUBackend implements INativeBackend {
             kBuildGrid = clCreateKernel(program, "build_grid", null);
             kDetect = clCreateKernel(program, "detect_collisions", null);
 
-            memCellStarts = clCreateBuffer(context, CL_MEM_READ_WRITE, (long)TABLE_SIZE * Sizeof.cl_uint, null, null);
-            memCellEnds = clCreateBuffer(context, CL_MEM_READ_WRITE, (long)TABLE_SIZE * Sizeof.cl_uint, null, null);
+            memCellStarts = clCreateBuffer(context, CL_MEM_READ_WRITE, (long) TABLE_SIZE * Sizeof.cl_uint, null, null);
+            memCellEnds = clCreateBuffer(context, CL_MEM_READ_WRITE, (long) TABLE_SIZE * Sizeof.cl_uint, null, null);
         }
 
-        private void safeReleaseMem(cl_mem mem) {
+        private cl_mem releaseMem(cl_mem mem) {
             if (mem != null) clReleaseMemObject(mem);
+            return null;
         }
 
         void reallocBuffers(int entityCount, int maxCollisions) {
             if (entityCount > currentEntityCap) {
                 int newCap = (int) (entityCount * 1.5);
-                safeReleaseMem(memAABB);
-                safeReleaseMem(memHashes);
-                safeReleaseMem(memIndices);
-                safeReleaseMem(memDensity);
+                memAABB = releaseMem(memAABB);
+                memHashes = releaseMem(memHashes);
+                memIndices = releaseMem(memIndices);
+                memDensity = releaseMem(memDensity);
 
-                memAABB = clCreateBuffer(context, CL_MEM_READ_ONLY, (long)newCap * 6 * Sizeof.cl_double, null, null);
-                memHashes = clCreateBuffer(context, CL_MEM_READ_WRITE, (long)newCap * Sizeof.cl_uint, null, null);
-                memIndices = clCreateBuffer(context, CL_MEM_READ_WRITE, (long)newCap * Sizeof.cl_uint, null, null);
-                memDensity = clCreateBuffer(context, CL_MEM_WRITE_ONLY, (long)newCap * Sizeof.cl_float, null, null);
+                memAABB = clCreateBuffer(context, CL_MEM_READ_ONLY, (long) newCap * 6 * Sizeof.cl_double, null, null);
+                memHashes = clCreateBuffer(context, CL_MEM_READ_WRITE, (long) newCap * Sizeof.cl_uint, null, null);
+                memIndices = clCreateBuffer(context, CL_MEM_READ_WRITE, (long) newCap * Sizeof.cl_uint, null, null);
+                memDensity = clCreateBuffer(context, CL_MEM_WRITE_ONLY, (long) newCap * Sizeof.cl_float, null, null);
 
-                cpuHashes = new int[newCap]; cpuIndices = new int[newCap];
-                tempKeys = new int[newCap]; tempValues = new int[newCap];
+                cpuHashes = new int[newCap];
+                cpuIndices = new int[newCap];
+                tempKeys = new int[newCap];
+                tempValues = new int[newCap];
                 resultWrapper.arrDensity = new float[newCap];
                 currentEntityCap = newCap;
             }
 
             if (maxCollisions > currentCollisionCap) {
                 int newCap = (int) (maxCollisions * 1.5);
-                safeReleaseMem(memOutA);
-                safeReleaseMem(memOutB);
+                memOutA = releaseMem(memOutA);
+                memOutB = releaseMem(memOutB);
 
-                memOutA = clCreateBuffer(context, CL_MEM_WRITE_ONLY, (long)newCap * Sizeof.cl_int, null, null);
-                memOutB = clCreateBuffer(context, CL_MEM_WRITE_ONLY, (long)newCap * Sizeof.cl_int, null, null);
+                memOutA = clCreateBuffer(context, CL_MEM_WRITE_ONLY, (long) newCap * Sizeof.cl_int, null, null);
+                memOutB = clCreateBuffer(context, CL_MEM_WRITE_ONLY, (long) newCap * Sizeof.cl_int, null, null);
                 resultWrapper.arrA = new int[newCap];
                 resultWrapper.arrB = new int[newCap];
                 currentCollisionCap = newCap;
@@ -206,36 +265,58 @@ public class GPUBackend implements INativeBackend {
         }
 
         void destroy() {
-            safeReleaseMem(memAABB);
-            safeReleaseMem(memHashes);
-            safeReleaseMem(memIndices);
-            safeReleaseMem(memOutA);
-            safeReleaseMem(memOutB);
-            safeReleaseMem(memDensity);
-            safeReleaseMem(memCounter);
-            safeReleaseMem(memCellStarts);
-            safeReleaseMem(memCellEnds);
+            memAABB = releaseMem(memAABB);
+            memHashes = releaseMem(memHashes);
+            memIndices = releaseMem(memIndices);
+            memOutA = releaseMem(memOutA);
+            memOutB = releaseMem(memOutB);
+            memDensity = releaseMem(memDensity);
+            memCounter = releaseMem(memCounter);
+            memCellStarts = releaseMem(memCellStarts);
+            memCellEnds = releaseMem(memCellEnds);
 
             if (kComputeHash != null) clReleaseKernel(kComputeHash);
             if (kResetGrid != null) clReleaseKernel(kResetGrid);
             if (kBuildGrid != null) clReleaseKernel(kBuildGrid);
             if (kDetect != null) clReleaseKernel(kDetect);
             if (commandQueue != null) clReleaseCommandQueue(commandQueue);
+            kComputeHash = null;
+            kResetGrid = null;
+            kBuildGrid = null;
+            kDetect = null;
+            commandQueue = null;
+            cpuHashes = null;
+            cpuIndices = null;
+            tempKeys = null;
+            tempValues = null;
+            resultWrapper.arrA = null;
+            resultWrapper.arrB = null;
+            resultWrapper.arrDensity = null;
+            currentEntityCap = -1;
+            currentCollisionCap = -1;
         }
     }
 
+    private static int threadStateEpoch = 0;
     private static final Set<ThreadState> ALL_THREAD_STATES = ConcurrentHashMap.newKeySet();
-    private static final ThreadLocal<ThreadState> THREAD_STATE = ThreadLocal.withInitial(() -> {
-        ThreadState state = new ThreadState();
-        ALL_THREAD_STATES.add(state);
+    private static final ThreadLocal<ThreadState> THREAD_STATE = new ThreadLocal<>();
+
+    private static ThreadState threadState() {
+        ThreadState state = THREAD_STATE.get();
+        if (state == null || state.epoch != threadStateEpoch) {
+            state = new ThreadState();
+            state.epoch = threadStateEpoch;
+            THREAD_STATE.set(state);
+            ALL_THREAD_STATES.add(state);
+        }
         return state;
-    });
+    }
 
     @Override
     public void initialize() {
         if (isInitialized) return;
 
-        Logger logger = AcceleratedRecoiling.LOGGER;
+        Logger logger = System.getLogger("acceleratedrecoiling.algorithm");
         try {
             setExceptionsEnabled(true);
 
@@ -262,7 +343,6 @@ public class GPUBackend implements INativeBackend {
                         break;
                     }
                 } catch (CLException e) {
-                    // 忽略 no gpu 的异常
                 }
             }
             if (targetPlatform == null || targetDevice == null) {
@@ -272,8 +352,8 @@ public class GPUBackend implements INativeBackend {
             clGetDeviceInfo(targetDevice, CL_DEVICE_NAME, 0, null, size);
             byte[] nameBuffer = new byte[(int) size[0]];
             clGetDeviceInfo(targetDevice, CL_DEVICE_NAME, nameBuffer.length, Pointer.to(nameBuffer), null);
-            String gpuName = new String(nameBuffer, 0, nameBuffer.length - 1).trim(); // remove /0
-            logger.info("OpenCL Backend Initialized. Using GPU: {}", gpuName);
+            String gpuName = new String(nameBuffer, 0, nameBuffer.length - 1).trim();
+            logger.log(Level.INFO, "OpenCL Backend Initialized. Using GPU: {0}", gpuName);
 
             device = targetDevice;
 
@@ -293,7 +373,9 @@ public class GPUBackend implements INativeBackend {
     }
 
     @Override
-    public void applyConfig() {}
+    public void setConfig(CollisionConfig config) {
+        this.config = config;
+    }
 
     @Override
     public void destroy() {
@@ -302,45 +384,49 @@ public class GPUBackend implements INativeBackend {
 
         for (ThreadState state : ALL_THREAD_STATES) state.destroy();
         ALL_THREAD_STATES.clear();
+        threadStateEpoch++;
 
         if (program != null) clReleaseProgram(program);
         if (context != null) clReleaseContext(context);
+        program = null;
+        context = null;
+        device = null;
         maxSizeTouched.set(-1);
-        ParallelAABB.isInitialized = false;
     }
 
     @Override
-    public PushResult push(double[] locations, double[] aabb, int[] resultSizeOut) {
+    public CollisionResult push(double[] locations, double[] aabb, int[] resultSizeOut) {
         if (!isInitialized) return null;
 
         int entityCount = aabb.length / 6;
         if (entityCount == 0) {
-            resultSizeOut[0] = 0; return null;
+            resultSizeOut[0] = 0;
+            return null;
         }
 
-        int maxCollisions = entityCount * FoldConfig.maxCollision;
+        int maxCollisions = entityCount * config.maxCollision();
         maxSizeTouched.updateAndGet(current -> Math.max(current, entityCount));
 
-        ThreadState state = THREAD_STATE.get();
+        ThreadState state = threadState();
         state.reallocBuffers(entityCount, maxCollisions);
 
         clEnqueueWriteBuffer(state.commandQueue, state.memAABB, CL_TRUE, 0,
                 (long) entityCount * 6 * Sizeof.cl_double, Pointer.to(aabb), 0, null, null);
 
-        clSetKernelArg(state.kComputeHash, 0, Sizeof.cl_mem   , Pointer.to(state.memAABB));
-        clSetKernelArg(state.kComputeHash, 1, Sizeof.cl_mem   , Pointer.to(state.memHashes));
-        clSetKernelArg(state.kComputeHash, 2, Sizeof.cl_mem   , Pointer.to(state.memIndices));
-        clSetKernelArg(state.kComputeHash, 3, Sizeof.cl_int   , Pointer.to(new int[]{entityCount}));
+        clSetKernelArg(state.kComputeHash, 0, Sizeof.cl_mem, Pointer.to(state.memAABB));
+        clSetKernelArg(state.kComputeHash, 1, Sizeof.cl_mem, Pointer.to(state.memHashes));
+        clSetKernelArg(state.kComputeHash, 2, Sizeof.cl_mem, Pointer.to(state.memIndices));
+        clSetKernelArg(state.kComputeHash, 3, Sizeof.cl_int, Pointer.to(new int[]{entityCount}));
         clSetKernelArg(state.kComputeHash, 4, Sizeof.cl_double, Pointer.to(new double[]{CELL_SIZE}));
         clEnqueueNDRangeKernel(state.commandQueue, state.kComputeHash, 1, null, new long[]{entityCount}, null, 0, null, null);
 
-        clEnqueueReadBuffer(state.commandQueue, state.memHashes , CL_TRUE, 0, (long)entityCount * Sizeof.cl_uint, Pointer.to(state.cpuHashes), 0, null, null);
-        clEnqueueReadBuffer(state.commandQueue, state.memIndices, CL_TRUE, 0, (long)entityCount * Sizeof.cl_uint, Pointer.to(state.cpuIndices), 0, null, null);
+        clEnqueueReadBuffer(state.commandQueue, state.memHashes, CL_TRUE, 0, (long) entityCount * Sizeof.cl_uint, Pointer.to(state.cpuHashes), 0, null, null);
+        clEnqueueReadBuffer(state.commandQueue, state.memIndices, CL_TRUE, 0, (long) entityCount * Sizeof.cl_uint, Pointer.to(state.cpuIndices), 0, null, null);
 
         radixSort32(state.cpuHashes, state.cpuIndices, state.tempKeys, state.tempValues, entityCount);
 
-        clEnqueueWriteBuffer(state.commandQueue, state.memHashes, CL_TRUE, 0, (long)entityCount * Sizeof.cl_uint, Pointer.to(state.cpuHashes), 0, null, null);
-        clEnqueueWriteBuffer(state.commandQueue, state.memIndices, CL_TRUE, 0, (long)entityCount * Sizeof.cl_uint, Pointer.to(state.cpuIndices), 0, null, null);
+        clEnqueueWriteBuffer(state.commandQueue, state.memHashes, CL_TRUE, 0, (long) entityCount * Sizeof.cl_uint, Pointer.to(state.cpuHashes), 0, null, null);
+        clEnqueueWriteBuffer(state.commandQueue, state.memIndices, CL_TRUE, 0, (long) entityCount * Sizeof.cl_uint, Pointer.to(state.cpuIndices), 0, null, null);
 
         clSetKernelArg(state.kResetGrid, 0, Sizeof.cl_mem, Pointer.to(state.memCellStarts));
         clSetKernelArg(state.kResetGrid, 1, Sizeof.cl_mem, Pointer.to(state.memCellEnds));
@@ -356,17 +442,17 @@ public class GPUBackend implements INativeBackend {
         int[] zeroCount = new int[]{0};
         clEnqueueWriteBuffer(state.commandQueue, state.memCounter, CL_TRUE, 0, Sizeof.cl_int, Pointer.to(zeroCount), 0, null, null);
 
-        clSetKernelArg(state.kDetect, 0 , Sizeof.cl_mem   , Pointer.to(state.memAABB));
-        clSetKernelArg(state.kDetect, 1 , Sizeof.cl_mem   , Pointer.to(state.memHashes));
-        clSetKernelArg(state.kDetect, 2 , Sizeof.cl_mem   , Pointer.to(state.memIndices));
-        clSetKernelArg(state.kDetect, 3 , Sizeof.cl_mem   , Pointer.to(state.memCellStarts));
-        clSetKernelArg(state.kDetect, 4 , Sizeof.cl_mem   , Pointer.to(state.memCellEnds));
-        clSetKernelArg(state.kDetect, 5 , Sizeof.cl_mem   , Pointer.to(state.memOutA));
-        clSetKernelArg(state.kDetect, 6 , Sizeof.cl_mem   , Pointer.to(state.memOutB));
-        clSetKernelArg(state.kDetect, 7 , Sizeof.cl_mem   , Pointer.to(state.memDensity));
-        clSetKernelArg(state.kDetect, 8 , Sizeof.cl_mem   , Pointer.to(state.memCounter));
-        clSetKernelArg(state.kDetect, 9 , Sizeof.cl_int   , Pointer.to(new int[]{entityCount}));
-        clSetKernelArg(state.kDetect, 10, Sizeof.cl_int   , Pointer.to(new int[]{maxCollisions}));
+        clSetKernelArg(state.kDetect, 0, Sizeof.cl_mem, Pointer.to(state.memAABB));
+        clSetKernelArg(state.kDetect, 1, Sizeof.cl_mem, Pointer.to(state.memHashes));
+        clSetKernelArg(state.kDetect, 2, Sizeof.cl_mem, Pointer.to(state.memIndices));
+        clSetKernelArg(state.kDetect, 3, Sizeof.cl_mem, Pointer.to(state.memCellStarts));
+        clSetKernelArg(state.kDetect, 4, Sizeof.cl_mem, Pointer.to(state.memCellEnds));
+        clSetKernelArg(state.kDetect, 5, Sizeof.cl_mem, Pointer.to(state.memOutA));
+        clSetKernelArg(state.kDetect, 6, Sizeof.cl_mem, Pointer.to(state.memOutB));
+        clSetKernelArg(state.kDetect, 7, Sizeof.cl_mem, Pointer.to(state.memDensity));
+        clSetKernelArg(state.kDetect, 8, Sizeof.cl_mem, Pointer.to(state.memCounter));
+        clSetKernelArg(state.kDetect, 9, Sizeof.cl_int, Pointer.to(new int[]{entityCount}));
+        clSetKernelArg(state.kDetect, 10, Sizeof.cl_int, Pointer.to(new int[]{maxCollisions}));
         clSetKernelArg(state.kDetect, 11, Sizeof.cl_double, Pointer.to(new double[]{CELL_SIZE}));
         clEnqueueNDRangeKernel(state.commandQueue, state.kDetect, 1, null, new long[]{entityCount}, null, 0, null, null);
 
@@ -376,10 +462,10 @@ public class GPUBackend implements INativeBackend {
         resultSizeOut[0] = collisionTimes;
 
         if (collisionTimes > 0) {
-            clEnqueueReadBuffer(state.commandQueue, state.memOutA, CL_TRUE, 0, (long)collisionTimes * Sizeof.cl_int, Pointer.to(state.resultWrapper.arrA), 0, null, null);
-            clEnqueueReadBuffer(state.commandQueue, state.memOutB, CL_TRUE, 0, (long)collisionTimes * Sizeof.cl_int, Pointer.to(state.resultWrapper.arrB), 0, null, null);
+            clEnqueueReadBuffer(state.commandQueue, state.memOutA, CL_TRUE, 0, (long) collisionTimes * Sizeof.cl_int, Pointer.to(state.resultWrapper.arrA), 0, null, null);
+            clEnqueueReadBuffer(state.commandQueue, state.memOutB, CL_TRUE, 0, (long) collisionTimes * Sizeof.cl_int, Pointer.to(state.resultWrapper.arrB), 0, null, null);
         }
-        clEnqueueReadBuffer(state.commandQueue, state.memDensity, CL_TRUE, 0, (long)entityCount * Sizeof.cl_float, Pointer.to(state.resultWrapper.arrDensity), 0, null, null);
+        clEnqueueReadBuffer(state.commandQueue, state.memDensity, CL_TRUE, 0, (long) entityCount * Sizeof.cl_float, Pointer.to(state.resultWrapper.arrDensity), 0, null, null);
 
         return state.resultWrapper;
     }
@@ -406,8 +492,12 @@ public class GPUBackend implements INativeBackend {
                 dstKeys[destIdx] = srcKeys[i];
                 dstVals[destIdx] = srcVals[i];
             }
-            int[] tempKeys = srcKeys; srcKeys = dstKeys; dstKeys = tempKeys;
-            int[] tempVals = srcVals; srcVals = dstVals; dstVals = tempVals;
+            int[] tempKeys = srcKeys;
+            srcKeys = dstKeys;
+            dstKeys = tempKeys;
+            int[] tempVals = srcVals;
+            srcVals = dstVals;
+            dstVals = tempVals;
         }
     }
 }

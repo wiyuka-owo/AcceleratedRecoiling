@@ -1,7 +1,6 @@
-# 项目排除路径
 /.gradle/
 /build/
-/build/classes/java/main/
+/algorithm/build/
 /run/
 /.idea/
 /AcceleratedRecoiling-third-party/

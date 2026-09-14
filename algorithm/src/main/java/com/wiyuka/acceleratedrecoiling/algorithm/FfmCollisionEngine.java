@@ -1,90 +1,91 @@
-package com.wiyuka.acceleratedrecoiling.natives;
+package com.wiyuka.acceleratedrecoiling.algorithm;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.wiyuka.acceleratedrecoiling.AcceleratedRecoiling;
-import com.wiyuka.acceleratedrecoiling.config.FoldConfig;
-import com.wiyuka.acceleratedrecoiling.ffm.FFM;
-import org.slf4j.Logger;
-
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import java.lang.System.Logger;
+import java.lang.System.Logger.Level;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.SymbolLookup;
 import java.lang.invoke.MethodHandle;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
-import static java.lang.foreign.ValueLayout.*;
+import static java.lang.foreign.ValueLayout.ADDRESS;
+import static java.lang.foreign.ValueLayout.JAVA_FLOAT;
+import static java.lang.foreign.ValueLayout.JAVA_INT;
 
-public class FFMBackend implements INativeBackend {
+public class FfmCollisionEngine implements CollisionEngine {
+    private final Path libraryPath;
+    private CollisionConfig config = new CollisionConfig(32, 1, 4, 1);
     private static Linker linker;
     private static Arena nativeArena;
     private static MethodHandle pushMethodHandle = null;
     private static MethodHandle createCtxMethodHandle = null;
     private static MethodHandle destroyCtxMethodHandle = null;
     private static MethodHandle createCfgMethodHandle = null;
-
     private static MethodHandle updateCfgMethodHandle = null;
     private static MethodHandle destroyCfgMethodHandle = null;
-
     private static final AtomicLong maxSizeTouched = new AtomicLong(-1);
+    private static volatile boolean isInitialized = false;
+
+    public FfmCollisionEngine(Path libraryPath) {
+        this.libraryPath = libraryPath;
+    }
 
     @Override
     public String getName() {
         return "FFM";
     }
 
-    static class PushResultFFM implements com.wiyuka.acceleratedrecoiling.natives.PushResult {
+    static class PushResultFFM implements CollisionResult {
         private MemorySegment segmentA;
         private MemorySegment segmentB;
         private MemorySegment segmentDensity;
 
-        private PushResultFFM() {}
+        private PushResultFFM() {
+        }
+
         void update(MemorySegment a, MemorySegment b, MemorySegment density) {
             this.segmentA = a;
             this.segmentB = b;
             this.segmentDensity = density;
         }
+
         @Override
         public int getA(int index) {
             return segmentA.get(JAVA_INT, (long) index * Integer.BYTES);
         }
+
         @Override
         public int getB(int index) {
             return segmentB.get(JAVA_INT, (long) index * Integer.BYTES);
         }
+
         @Override
         public float getDensity(int index) {
             return segmentDensity.get(JAVA_FLOAT, (long) index * Float.BYTES);
         }
+
         @Override
         public void copyATo(int[] dest, int length) {
             MemorySegment.copy(segmentA, JAVA_INT, 0, dest, 0, length);
         }
+
         @Override
         public void copyBTo(int[] dest, int length) {
             MemorySegment.copy(segmentB, JAVA_INT, 0, dest, 0, length);
         }
+
         @Override
         public void copyDensityTo(float[] dest, int length) {
             MemorySegment.copy(segmentDensity, JAVA_FLOAT, 0, dest, 0, length);
         }
     }
-    private static class ThreadState {
+
+    private class ThreadState {
         Arena bufferArena = null;
         MemorySegment bufA;
         MemorySegment bufB;
@@ -92,8 +93,8 @@ public class FFMBackend implements INativeBackend {
         MemorySegment context;
         MemorySegment configPtr;
         int currentSize = -1;
-
         final PushResultFFM resultWrapper = new PushResultFFM();
+
         ThreadState() {
             try {
                 if (createCtxMethodHandle != null) {
@@ -101,10 +102,10 @@ public class FFMBackend implements INativeBackend {
                 }
                 if (createCfgMethodHandle != null) {
                     configPtr = (MemorySegment) createCfgMethodHandle.invokeExact(
-                            FoldConfig.maxCollision,
-                            FoldConfig.gridSize,
-                            FoldConfig.densityWindow,
-                            FoldConfig.maxThreads
+                            config.maxCollision(),
+                            config.gridSize(),
+                            config.densityWindow(),
+                            config.maxThreads()
                     );
                 }
             } catch (Throwable e) {
@@ -126,123 +127,119 @@ public class FFMBackend implements INativeBackend {
                 densityBuf = bufferArena.allocate(densitySizeTotal);
                 currentSize = (int) newSizeTotal;
             }
-
-            // 更新封装类中的内部指针
             resultWrapper.update(bufA, bufB, densityBuf);
             return resultWrapper;
         }
 
         void destroy() {
+            Logger logger = System.getLogger("acceleratedrecoiling.algorithm");
             if (bufferArena != null) {
-                try { bufferArena.close(); } catch (Exception ignored) {}
+                try {
+                    bufferArena.close();
+                } catch (Exception ignored) {
+                }
             }
             if (context != null && destroyCtxMethodHandle != null) {
                 try {
                     destroyCtxMethodHandle.invokeExact(context);
                 } catch (Throwable e) {
-                    AcceleratedRecoiling.LOGGER.error("Failed to destroy native context", e);
+                    logger.log(Level.ERROR, "Failed to destroy native context", e);
                 }
             }
-
             if (configPtr != null && destroyCfgMethodHandle != null) {
                 try {
                     destroyCfgMethodHandle.invokeExact(configPtr);
                 } catch (Throwable e) {
-                    AcceleratedRecoiling.LOGGER.error("Failed to destroy native config", e);
+                    logger.log(Level.ERROR, "Failed to destroy native config", e);
                 }
             }
         }
     }
 
-    @Override
-    public void applyConfig() {
-        if (!ParallelAABB.isInitialized || updateCfgMethodHandle == null) {
-            return;
-        }
-        for (ThreadState state : ALL_THREAD_STATES) {
-            if (state.configPtr != null) {
-                try {
-                    updateCfgMethodHandle.invokeExact(
-                            state.configPtr,
-                            FoldConfig.maxCollision,
-                            FoldConfig.gridSize,
-                            FoldConfig.densityWindow,
-                            FoldConfig.maxThreads
-                    );
-                } catch (Throwable e) {
-                    AcceleratedRecoiling.LOGGER.error("Failed to update native config for thread", e);
-                }
-            }
-        }
-    }
-
-    private static final Set<ThreadState> ALL_THREAD_STATES = ConcurrentHashMap.newKeySet();
-
-    private static final ThreadLocal<ThreadState> THREAD_STATE = ThreadLocal.withInitial(() -> {
+    private final Set<ThreadState> allThreadStates = ConcurrentHashMap.newKeySet();
+    private final ThreadLocal<ThreadState> threadState = ThreadLocal.withInitial(() -> {
         ThreadState state = new ThreadState();
-        ALL_THREAD_STATES.add(state);
+        allThreadStates.add(state);
         return state;
     });
 
     @Override
-    public void destroy() {
-        if (!ParallelAABB.isInitialized) {
+    public void setConfig(CollisionConfig config) {
+        this.config = config;
+        if (!isInitialized || updateCfgMethodHandle == null) {
             return;
         }
+        Logger logger = System.getLogger("acceleratedrecoiling.algorithm");
+        for (ThreadState state : allThreadStates) {
+            if (state.configPtr != null) {
+                try {
+                    updateCfgMethodHandle.invokeExact(
+                            state.configPtr,
+                            config.maxCollision(),
+                            config.gridSize(),
+                            config.densityWindow(),
+                            config.maxThreads()
+                    );
+                } catch (Throwable e) {
+                    logger.log(Level.ERROR, "Failed to update native config for thread", e);
+                }
+            }
+        }
+    }
 
-        ParallelAABB.isInitialized = false;
+    @Override
+    public void destroy() {
+        if (!isInitialized) {
+            return;
+        }
+        isInitialized = false;
 
-        for (ThreadState state : ALL_THREAD_STATES) {
+        for (ThreadState state : allThreadStates) {
             state.destroy();
         }
-        ALL_THREAD_STATES.clear();
+        allThreadStates.clear();
 
         nativeArena = null;
         linker = null;
         pushMethodHandle = null;
         createCtxMethodHandle = null;
         destroyCtxMethodHandle = null;
+        createCfgMethodHandle = null;
+        updateCfgMethodHandle = null;
+        destroyCfgMethodHandle = null;
 
         maxSizeTouched.set(-1);
     }
 
-    private static SymbolLookup findFoldLib(Arena arena, String dllPath) {
-        return SymbolLookup.libraryLookup(dllPath, arena);
-    }
-
     @Override
-    public PushResult push(
-            double[] locations,
-            double[] aabb,
-            int[] resultSizeOut
-    ) {
-        if (!ParallelAABB.isInitialized) {
+    public CollisionResult push(double[] locations, double[] aabb, int[] resultSizeOut) {
+        if (!isInitialized) {
             return null;
         }
 
-        ThreadState state = THREAD_STATE.get();
+        ThreadState state = threadState.get();
         if (state.context == null) {
             return null;
         }
 
         try (Arena tempArena = Arena.ofConfined()) {
             int count = locations.length / 3;
-            int resultSize = locations.length * FoldConfig.maxCollision;
+            int resultSize = locations.length * config.maxCollision();
             maxSizeTouched.updateAndGet(current -> Math.max(current, count));
 
-            MemorySegment aabbMem = FFM.allocateArray(tempArena, aabb);
+            MemorySegment aabbMem = FfmAlloc.allocateArray(tempArena, aabb);
             PushResultFFM collisionPairs = state.reallocOutputBuf(resultSize);
 
-            int collisionSize = 0;
+            int collisionSize;
             try {
                 collisionSize = (int) pushMethodHandle.invokeExact(
-                        aabbMem,                 // const double *aabbs
-                        collisionPairs.segmentA, // int *outputA
-                        collisionPairs.segmentB, // int *outputB
-                        count,                   // int entityCount
-                        collisionPairs.segmentDensity, // float* densityBuf
-                        state.context,           // void* memDataPtrOri
-                        state.configPtr          // void* configPtr
+                        aabbMem,
+                        collisionPairs.segmentA,
+                        collisionPairs.segmentB,
+                        count,
+                        collisionPairs.segmentDensity,
+                        state.context,
+                        state.configPtr
                 );
             } catch (Throwable e) {
                 throw new RuntimeException("Failed to invoke native push method", e);
@@ -257,40 +254,25 @@ public class FFMBackend implements INativeBackend {
 
     @Override
     public void initialize() {
-        Logger logger = AcceleratedRecoiling.LOGGER;
-        String dllPath = "";
-        String dllName = "AcceleratedRecoiling";
-        String fullDllName = System.mapLibraryName(dllName);
+        if (isInitialized) return;
 
-        String resourcePath = NativeInterface.getPlatformNativePath() + fullDllName;
-        try (InputStream dllStream = AcceleratedRecoiling.class.getResourceAsStream(resourcePath)) {
-            if (dllStream == null) {
-                throw new FileNotFoundException("Cannot find " + fullDllName + " in resources at path: " + resourcePath);
-            }
-            File tempDll = File.createTempFile(UUID.randomUUID() + "_acceleratedRecoiling_", "_" + fullDllName);
-            tempDll.deleteOnExit();
-            dllPath = tempDll.getAbsolutePath();
-            try (OutputStream out = new FileOutputStream(tempDll)) {
-                dllStream.transferTo(out);
-                logger.info("Extracted native library from {} to temp: {}", resourcePath, dllPath);
-            }
-        } catch (IOException e) {
-            throw new RuntimeException("Native library load failed: " + e.getMessage(), e);
-        }
+        Logger logger = System.getLogger("acceleratedrecoiling.algorithm");
+        String dllPath = libraryPath.toAbsolutePath().toString();
+
         linker = Linker.nativeLinker();
         nativeArena = Arena.global();
-        SymbolLookup lib = findFoldLib(nativeArena, dllPath);
+        SymbolLookup lib = SymbolLookup.libraryLookup(dllPath, nativeArena);
         pushMethodHandle = linker.downcallHandle(
                 lib.find("push").orElseThrow(() -> new RuntimeException("Cannot find symbol 'push'")),
                 FunctionDescriptor.of(
-                        JAVA_INT,   // return: collisionTimes
-                        ADDRESS,    // const double* aabbs
-                        ADDRESS,    // int* outputA
-                        ADDRESS,    // int* outputB
-                        JAVA_INT,   // int count
-                        ADDRESS,    // float* densityBuf
-                        ADDRESS,    // void* memDataPtrOri (Context)
-                        ADDRESS     // void* configPtr
+                        JAVA_INT,
+                        ADDRESS,
+                        ADDRESS,
+                        ADDRESS,
+                        JAVA_INT,
+                        ADDRESS,
+                        ADDRESS,
+                        ADDRESS
                 )
         );
         createCtxMethodHandle = linker.downcallHandle(
@@ -307,7 +289,7 @@ public class FFMBackend implements INativeBackend {
                     FunctionDescriptor.ofVoid(ADDRESS, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT)
             );
         } catch (Exception e) {
-            logger.warn("Cannot find symbol 'updateCfg'");
+            logger.log(Level.WARNING, "Cannot find symbol 'updateCfg'");
         }
         try {
             destroyCfgMethodHandle = linker.downcallHandle(
@@ -315,7 +297,7 @@ public class FFMBackend implements INativeBackend {
                     FunctionDescriptor.ofVoid(ADDRESS)
             );
         } catch (Exception e) {
-            logger.warn("Cannot find symbol 'destroyCfg'");
+            logger.log(Level.WARNING, "Cannot find symbol 'destroyCfg'");
         }
         try {
             destroyCtxMethodHandle = linker.downcallHandle(
@@ -323,7 +305,8 @@ public class FFMBackend implements INativeBackend {
                     FunctionDescriptor.ofVoid(ADDRESS)
             );
         } catch (Exception e) {
-            logger.warn("Cannot find symbol 'destroyCtx'");
+            logger.log(Level.WARNING, "Cannot find symbol 'destroyCtx'");
         }
+        isInitialized = true;
     }
 }

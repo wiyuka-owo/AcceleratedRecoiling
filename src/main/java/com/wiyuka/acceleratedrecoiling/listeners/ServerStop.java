@@ -10,7 +10,6 @@ import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 public class ServerStop {
     @SubscribeEvent
     public static void onServerStop(ServerStoppingEvent event) {
-//        MinecraftServer server = event.getServer();
         NativeInterface.destroy();
     }
 }

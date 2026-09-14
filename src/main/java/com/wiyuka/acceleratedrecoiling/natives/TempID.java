@@ -6,7 +6,6 @@ import net.minecraft.world.entity.Entity;
 import java.util.Arrays;
 
 public class TempID {
-
     private static Entity[] frameSnapshot = new Entity[10000];
     public static int currentIndex = 0;
 
@@ -23,19 +22,19 @@ public class TempID {
         }
         int tempId = currentIndex++;
         frameSnapshot[tempId] = e;
-         ((ICustomData)e).setNativeId(tempId);
+        ((ICustomData) e).setNativeId(tempId);
     }
 
     public static Entity getEntity(int id) {
         if (id < 0 || id >= currentIndex) return null;
         return frameSnapshot[id];
     }
+
     public static int getId(Entity e) {
-        return ((ICustomData)e).getNativeId();
+        return ((ICustomData) e).getNativeId();
     }
 
     private static void resize() {
-        // 扩容 1.5 倍
         int newSize = frameSnapshot.length + (frameSnapshot.length >> 1);
         frameSnapshot = Arrays.copyOf(frameSnapshot, newSize);
     }

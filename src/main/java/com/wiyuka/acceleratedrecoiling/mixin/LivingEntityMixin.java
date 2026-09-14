@@ -1,12 +1,11 @@
 package com.wiyuka.acceleratedrecoiling.mixin;
 
-
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.wiyuka.acceleratedrecoiling.api.ICustomData;
 import com.wiyuka.acceleratedrecoiling.config.FoldConfig;
 import com.wiyuka.acceleratedrecoiling.natives.CollisionMapData;
-import com.wiyuka.acceleratedrecoiling.natives.JavaVanillaBackend;
+import com.wiyuka.acceleratedrecoiling.natives.NativeInterface;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySelector;
 import net.minecraft.world.entity.LivingEntity;
@@ -19,33 +18,16 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
 
 @Mixin(value = LivingEntity.class, priority = 1100)
 public class LivingEntityMixin {
-//    @Inject(
-//            method = "pushEntities",
-//            at = @At(
-//                    "HEAD"
-//            ),
-//            cancellable = true
-//    )
-//    private void pushEntities(final CallbackInfo ci) {
-//        LivingEntity self = (LivingEntity)(Object)this;
-//        if(self.level().isClientSide) return;
-//
-////        ci.cancel();
-//        if((FoldConfig.fold) && self.getType() != EntityType.PLAYER) {
-//            ci.cancel();
-//        }
-//    }
     @Unique
     private int lastClimbableCheckTick = -1;
     @Unique
     private boolean cachedClimbableResult = false;
-
 
     @WrapOperation(
             method = "pushEntities",
@@ -55,18 +37,19 @@ public class LivingEntityMixin {
             )
     )
     private void doPushVerify(LivingEntity instance, Entity entity, Operation<Void> original) {
-        if(instance.getBoundingBox().intersects(entity.getBoundingBox())) original.call(instance, entity);
+        if (instance.getBoundingBox().intersects(entity.getBoundingBox())) original.call(instance, entity);
     }
 
     @Inject(method = "onClimbable", at = @At("HEAD"), cancellable = true)
     private void injectOnClimbableHead(CallbackInfoReturnable<Boolean> cir) {
-        if (((LivingEntity)(Object)this).tickCount == this.lastClimbableCheckTick) {
+        if (((LivingEntity) (Object) this).tickCount == this.lastClimbableCheckTick) {
             cir.setReturnValue(this.cachedClimbableResult);
         }
     }
+
     @Inject(method = "onClimbable", at = @At("RETURN"))
     private void injectOnClimbableReturn(CallbackInfoReturnable<Boolean> cir) {
-        this.lastClimbableCheckTick = ((LivingEntity)(Object)this).tickCount;
+        this.lastClimbableCheckTick = ((LivingEntity) (Object) this).tickCount;
         this.cachedClimbableResult = cir.getReturnValueZ();
     }
 
@@ -81,12 +64,11 @@ public class LivingEntityMixin {
         if (instance.isPassenger()) {
             return true;
         }
-        AABB myBox = ((LivingEntity)(Object)this).getBoundingBox();
+        AABB myBox = ((LivingEntity) (Object) this).getBoundingBox();
         AABB otherBox = instance.getBoundingBox();
         if (!myBox.intersects(otherBox)) return true;
         return false;
     }
-
 
     @WrapOperation(
             method = "pushEntities",
@@ -100,7 +82,9 @@ public class LivingEntityMixin {
             return original.call(instance, entity, boundingBox);
         }
 
-        if(JavaVanillaBackend.isSelected()) return JavaVanillaBackend.getPushableEntities(entity,  boundingBox);
+        if (NativeInterface.isJavaVanilla()) {
+            return NativeInterface.javaVanillaNeighbors(entity, boundingBox);
+        }
 
         ICustomData data = (ICustomData) entity;
 
@@ -118,46 +102,5 @@ public class LivingEntityMixin {
         }
 
         return filteredList;
-
     }
-
-//    @Inject(
-//            method = "aiStep",
-//            at = @At(
-//                    "HEAD"
-//            ),
-//            cancellable = true
-//    )
-//    private void aiStep(final CallbackInfo ci) {
-//        LivingEntity self = (LivingEntity) (Object) this;
-//        if(self instanceof Player) return;
-//        ci.cancel();
-//
-//    }
-//    @Inject(
-//            method = "serverAiStep",
-//            at = @At(
-//                    "HEAD"
-//            ),
-//            cancellable = true
-//    )
-//    private void serverAiStep(final CallbackInfo ci) {
-//        LivingEntity self = (LivingEntity) (Object) this;
-//
-//        if(self instanceof Player) return;
-//        ci.cancel();
-//    }
-//    @Redirect(
-//            method = "aiStep",
-//            at = @At(
-//                    value = "INVOKE",
-//                    target = "Lnet/minecraft/world/entity/LivingEntity;pushEntities()V"
-//            ),
-//            cancellable = true
-//    )
-//    public void pushEntities(LivingEntity livingEntity) {
-//        if (!ParallelAABB.useFold || livingEntity instanceof Player) {
-//            pushEntities(livingEntity);
-//        }
-//    }
 }

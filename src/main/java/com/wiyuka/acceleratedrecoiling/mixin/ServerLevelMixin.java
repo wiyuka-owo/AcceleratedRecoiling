@@ -1,7 +1,6 @@
 package com.wiyuka.acceleratedrecoiling.mixin;
 
 import com.wiyuka.acceleratedrecoiling.config.FoldConfig;
-import com.wiyuka.acceleratedrecoiling.natives.JavaVanillaBackend;
 import com.wiyuka.acceleratedrecoiling.natives.ParallelAABB;
 import com.wiyuka.acceleratedrecoiling.natives.TempID;
 import net.minecraft.server.level.ServerLevel;
@@ -21,66 +20,30 @@ import java.util.function.BooleanSupplier;
 
 @Mixin(ServerLevel.class)
 public abstract class ServerLevelMixin {
+    @Shadow
+    @Final
+    private EntityTickList entityTickList;
 
-    @Shadow @Final private EntityTickList entityTickList;
-
-    /**
-     * 重定向 ServerLevel.tick() 方法中对 entityTickList.forEach() 的调用
-     */
-
-//    @Inject(
-//            method = "addEntity",
-//            at = @At("RETURN")
-//    )
-//    private void addEntity(Entity entity, CallbackInfoReturnable<Boolean> cir) {
-//        NativeIDManager.register(entity);
-//    }
     @Inject(
             method = "tick(Ljava/util/function/BooleanSupplier;)V",
             at = @At("HEAD")
     )
     private void tick(BooleanSupplier booleanSupplier, CallbackInfo ci) {
-
         TempID.tickStart();
-        if(JavaVanillaBackend.isSelected()) JavaVanillaBackend.tick(this.entityTickList);
 
         List<Entity> livingEntities = new ArrayList<>();
-//        List<Entity> entityList = new ArrayList<>();
-        List<Player> playerEntities = new ArrayList<>();
-        this.entityTickList.forEach( entity -> {
+        List<Entity> queryEntities = new ArrayList<>();
+        this.entityTickList.forEach(entity -> {
             if (!entity.isRemoved()) {
-                if (entity instanceof Player) {
-                    playerEntities.add((Player) entity);
-                } else if (entity instanceof Entity) {
-                    livingEntities.add((Entity) entity);
+                queryEntities.add(entity);
+                if (!(entity instanceof Player)) {
+                    livingEntities.add(entity);
                 }
             }
             TempID.addEntity(entity);
         });
         if (FoldConfig.enableEntityCollision) {
-            ParallelAABB.handleEntityPush(livingEntities, 1.0E-7);
+            ParallelAABB.handleEntityPush(livingEntities, queryEntities, 1.0E-7);
         }
     }
-
-
-//    @Redirect(
-//            method = "tick(Ljava/util/function/BooleanSupplier;)V", // 目标方法
-//            at = @At(
-//                    value = "INVOKE", // 拦截类型：方法调用
-//                    // 目标方法签名: void net.minecraft.world.level.entity.EntityTickList.forEach(Consumer<Entity>)
-//                    target = "Lnet/minecraft/world/level/entity/EntityTickList;forEach(Ljava/util/function/Consumer;)V"
-//            )
-//    )
-//    private void onTickEntities(EntityTickList entityTickList, Consumer<Entity> originalConsumer) {
-//        List<LivingEntity> livingEntities = new ArrayList<>();
-//        List<Player> playerEntities = new ArrayList<>();
-//
-//        Consumer<Entity> ourConsumer = entity -> {
-//            originalConsumer.accept(entity);
-//        };
-//
-//        entityTickList.forEach(ourConsumer);
-//
-//
-//    }
 }

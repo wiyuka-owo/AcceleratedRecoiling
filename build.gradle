@@ -12,7 +12,6 @@ plugins {
     id 'maven-publish'
     id 'idea'
     id 'net.neoforged.moddev' version '2.0.115'
-    id 'org.jetbrains.kotlin.jvm'
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -28,7 +27,6 @@ jar.doLast {
     File jarFile = archiveFile.get().asFile
     println "正在移除预览版标记: ${jarFile.name}..."
 
-    // 创建一个临时文件
     File tempFile = new File(jarFile.parent, jarFile.name + ".temp")
 
     try (JarFile jar = new JarFile(jarFile);
@@ -136,10 +134,16 @@ tasks.named('createMinecraftArtifacts') {
 
 dependencies {
     def joclVersion = "2.0.5"
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8"
+    implementation project(':algorithm')
+    additionalRuntimeClasspath project(':algorithm')
     implementation "org.jocl:jocl:${joclVersion}"
     additionalRuntimeClasspath "org.jocl:jocl:${joclVersion}"
     jarJar(group: 'org.jocl', name: 'jocl', version: "[${joclVersion},)")
+}
+
+tasks.named('jar').configure {
+    dependsOn ':algorithm:compileJava'
+    from project(':algorithm').layout.buildDirectory.dir('classes/java/main')
 }
 
 var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {
@@ -181,10 +185,6 @@ idea {
         downloadSources = true
         downloadJavadoc = true
     }
-}
-
-kotlin {
-    jvmToolchain(21)
 }
 
 def cppScript = file('cpp-build.gradle')

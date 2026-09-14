@@ -2,7 +2,6 @@ package com.wiyuka.acceleratedrecoiling.natives;
 
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
-import net.minecraft.client.renderer.chunk.SectionCompiler;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 
@@ -12,8 +11,6 @@ import java.util.List;
 
 public class CollisionMapData {
     private static final Int2ObjectOpenHashMap<IntArrayList> collisionMap = new Int2ObjectOpenHashMap<>(10000);
-
-//    private static final IntArrayList[] collisionMap = new IntArrayList[256];
 
     public static void putCollision(int idA, int idB) {
         addSingle(idA, idB);
@@ -53,9 +50,8 @@ public class CollisionMapData {
         @Override
         public Entity get(int index) {
             int entityId = ids.getInt(index);
-//            Entity target = level.getEntity(entityId);
             Entity target = TempID.getEntity(entityId);
-            if(target == null) return source;
+            if (target == null) return source;
             return target;
         }
 

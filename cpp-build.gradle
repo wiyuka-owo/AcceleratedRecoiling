@@ -17,8 +17,6 @@ dependencies {
     cppToolchain "com.wiyuka.env:AcceleratedRecoiling-third-party:toolchain_20260601_0@zip"
 }
 
-def zipUrl = "https://github.com/wiyuka0/AcceleratedRecoiling/releases/download/toolchain_20260403_0/AcceleratedRecoiling-third-party.zip"
-def toolchainZipFile = file("${layout.buildDirectory.get().asFile}/tmp/AcceleratedRecoiling-third-party.zip")
 def cppProjectDir = file("./AcceleratedRecoiling-third-party")
 def isWindows = System.getProperty("os.name").toLowerCase().contains("windows")
 
@@ -31,7 +29,7 @@ def registerNativeTask = { String taskName, String buildBatName, String descript
         def envScript = file("${cppProjectDir}/env/add_env.bat").absolutePath
         def buildScript = file("${cppProjectDir}/build/${buildBatName}").absolutePath
 
-        commandLine 'cmd', '/c', "call \"${envScript}\" && call \"${buildScript}\""
+        commandLine 'cmd', '/c', "call \"${envScript}\" && call \"${buildScript}\" < nul"
 
         doFirst {
             println "> 开始编译 ${description} (${buildBatName})"
@@ -57,27 +55,44 @@ def compileWin = registerNativeTask("compileNativeWin", "win-x64.bat", "Windows 
 def compileLinux = registerNativeTask("compileNativeLinux", "linux-x64.bat", "Linux 动态库")
 def compileMac = registerNativeTask("compileNativeMac", "macos-x64.bat", "macOS 动态库")
 
-tasks.named('jar').configure {
-    dependsOn 'compileNativeWin', 'compileNativeLinux', 'compileNativeMac'
+def generatedNatives = layout.buildDirectory.dir("generated/natives")
 
-    // Windows x64
-    from("${cppProjectDir}/out/win-x64/") {
-        include "*.dll"
-        into "natives/windows-x64"
+tasks.register("copyNativesToResources", Copy) {
+    def addNative = { String rel, String pattern, String dest ->
+        def dir = file("${cppProjectDir}/out/${rel}")
+        if (dir.directory) {
+            from(dir) {
+                include pattern
+                into dest
+            }
+        }
     }
-    // Linux x64
-    from("${cppProjectDir}/out/linux-x64/") {
-        include "*.so"
-        into "natives/linux-x64"
+    addNative("win-x64", "*.dll", "natives/windows-x64")
+    addNative("linux-x64", "*.so", "natives/linux-x64")
+    addNative("macos-x64", "*.dylib", "natives/macos-x64")
+    addNative("macos-arm64", "*.dylib", "natives/macos-arm64")
+    into generatedNatives
+}
+
+sourceSets.main.resources.srcDir generatedNatives
+
+tasks.named('copyNativesToResources').configure {
+    mustRunAfter 'compileNativeWin', 'compileNativeLinux', 'compileNativeMac'
+}
+
+tasks.named('processResources').configure {
+    dependsOn 'copyNativesToResources'
+}
+
+afterEvaluate {
+    ['runClient', 'runServer', 'runGameTestServer'].each { taskName ->
+        def runTask = tasks.findByName(taskName)
+        if (runTask != null) {
+            runTask.dependsOn 'copyNativesToResources'
+        }
     }
-    // MacOS x64 (Intel)
-    from("${cppProjectDir}/out/macos-x64/") {
-        include "*.dylib"
-        into "natives/macos-x64"
-    }
-    // MacOS arm64 (Apple Silicon)
-    from("${cppProjectDir}/out/macos-arm64/") {
-        include "*.dylib"
-        into "natives/macos-arm64"
-    }
+}
+
+tasks.named('jar').configure {
+    dependsOn 'compileNativeWin', 'compileNativeLinux', 'compileNativeMac', 'copyNativesToResources'
 }

@@ -1,37 +1,34 @@
-package com.wiyuka.acceleratedrecoiling.natives;
+package com.wiyuka.acceleratedrecoiling.algorithm;
 
-import com.wiyuka.acceleratedrecoiling.AcceleratedRecoiling;
-import com.wiyuka.acceleratedrecoiling.config.FoldConfig;
 import jdk.incubator.vector.IntVector;
 import jdk.incubator.vector.VectorMask;
 import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
-import org.slf4j.Logger;
 
+import java.lang.System.Logger;
+import java.lang.System.Logger.Level;
 import java.util.Arrays;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.IntStream;
 
-public class JavaSIMDBackend implements INativeBackend {
-
+public class JavaSimdCollisionEngine implements CollisionEngine {
     private static final AtomicLong maxSizeTouched = new AtomicLong(-1);
+    private CollisionConfig config = new CollisionConfig(32, 1, 4, 1);
 
     @Override
     public String getName() {
         return "Java SIMD (Vector API)";
     }
 
-    // ==========================================
-    // Result Wrapper
-    // ==========================================
-    static class PushResultJavaSIMD implements PushResult {
+    static class PushResultJavaSIMD implements CollisionResult {
         private int[] arrayA;
         private int[] arrayB;
         private float[] arrayDensity;
 
-        private PushResultJavaSIMD() {}
+        private PushResultJavaSIMD() {
+        }
 
         void update(int[] a, int[] b, float[] density) {
             this.arrayA = a;
@@ -40,37 +37,47 @@ public class JavaSIMDBackend implements INativeBackend {
         }
 
         @Override
-        public int getA(int index) { return arrayA[index]; }
+        public int getA(int index) {
+            return arrayA[index];
+        }
 
         @Override
-        public int getB(int index) { return arrayB[index]; }
+        public int getB(int index) {
+            return arrayB[index];
+        }
 
         @Override
-        public float getDensity(int index) { return arrayDensity[index]; }
+        public float getDensity(int index) {
+            return arrayDensity[index];
+        }
 
         @Override
-        public void copyATo(int[] dest, int length) { System.arraycopy(arrayA, 0, dest, 0, length); }
+        public void copyATo(int[] dest, int length) {
+            System.arraycopy(arrayA, 0, dest, 0, length);
+        }
 
         @Override
-        public void copyBTo(int[] dest, int length) { System.arraycopy(arrayB, 0, dest, 0, length); }
+        public void copyBTo(int[] dest, int length) {
+            System.arraycopy(arrayB, 0, dest, 0, length);
+        }
 
         @Override
-        public void copyDensityTo(float[] dest, int length) { System.arraycopy(arrayDensity, 0, dest, 0, length); }
+        public void copyDensityTo(float[] dest, int length) {
+            System.arraycopy(arrayDensity, 0, dest, 0, length);
+        }
     }
 
     private static class ThreadState {
+        int epoch;
         int[] bufA;
         int[] bufB;
         float[] densityBuf;
-
         final JavaSIMD engine = new JavaSIMD();
         int currentCollisionSize = -1;
         int currentEntitySize = -1;
-
         final PushResultJavaSIMD resultWrapper = new PushResultJavaSIMD();
 
         PushResultJavaSIMD reallocOutputBuf(int entityCount, int maxCollisions) {
-            // Buffer A 和 B 需要满足最大的碰撞存储空间
             if (maxCollisions > currentCollisionSize) {
                 int allocSize = Math.max(1024, (int) (maxCollisions * 1.2));
                 bufA = new int[allocSize];
@@ -82,7 +89,6 @@ public class JavaSIMDBackend implements INativeBackend {
                 densityBuf = new float[allocEntity];
                 currentEntitySize = allocEntity;
             }
-
             resultWrapper.update(bufA, bufB, densityBuf);
             return resultWrapper;
         }
@@ -94,48 +100,53 @@ public class JavaSIMDBackend implements INativeBackend {
         }
     }
 
+    private static int threadStateEpoch = 0;
     private static final Set<ThreadState> ALL_THREAD_STATES = ConcurrentHashMap.newKeySet();
-    private static final ThreadLocal<ThreadState> THREAD_STATE = ThreadLocal.withInitial(() -> {
-        ThreadState state = new ThreadState();
-        ALL_THREAD_STATES.add(state);
+    private static final ThreadLocal<ThreadState> THREAD_STATE = new ThreadLocal<>();
+
+    private static ThreadState threadState() {
+        ThreadState state = THREAD_STATE.get();
+        if (state == null || state.epoch != threadStateEpoch) {
+            state = new ThreadState();
+            state.epoch = threadStateEpoch;
+            THREAD_STATE.set(state);
+            ALL_THREAD_STATES.add(state);
+        }
         return state;
-    });
+    }
 
     @Override
     public void initialize() {
-        Logger logger = AcceleratedRecoiling.LOGGER;
+        Logger logger = System.getLogger("acceleratedrecoiling.algorithm");
         try {
             int dummy = IntVector.SPECIES_256.length();
-            logger.info("Java SIMD Vector API Backend initialized successfully. (Vector length: {})", dummy);
+            logger.log(Level.INFO, "Java SIMD Vector API Backend initialized successfully. (Vector length: {0})", dummy);
         } catch (Throwable e) {
             throw new RuntimeException("Vector API not available, Did you add '--add-modules jdk.incubator.vector' to JVM arguments?", e);
         }
     }
 
     @Override
-    public void applyConfig() {
+    public void setConfig(CollisionConfig config) {
+        this.config = config;
     }
 
     @Override
     public void destroy() {
-        if (!ParallelAABB.isInitialized) return;
-        ParallelAABB.isInitialized = false;
-
         for (ThreadState state : ALL_THREAD_STATES) {
             state.destroy();
         }
         ALL_THREAD_STATES.clear();
+        threadStateEpoch++;
         maxSizeTouched.set(-1);
     }
 
     @Override
-    public PushResult push(double[] locations, double[] aabb, int[] resultSizeOut) {
-        if (!ParallelAABB.isInitialized) return null;
-
-        ThreadState state = THREAD_STATE.get();
+    public CollisionResult push(double[] locations, double[] aabb, int[] resultSizeOut) {
+        ThreadState state = threadState();
 
         int count = locations.length / 3;
-        int maxResultSize = count * FoldConfig.maxCollision;
+        int maxResultSize = count * config.maxCollision();
         maxSizeTouched.updateAndGet(current -> Math.max(current, count));
 
         PushResultJavaSIMD collisionPairs = state.reallocOutputBuf(count, maxResultSize);
@@ -147,9 +158,9 @@ public class JavaSIMDBackend implements INativeBackend {
                     collisionPairs.arrayB,
                     collisionPairs.arrayDensity,
                     count,
-                    FoldConfig.maxCollision,
-                    FoldConfig.gridSize,
-                    FoldConfig.densityWindow
+                    config.maxCollision(),
+                    config.gridSize(),
+                    config.densityWindow()
             );
 
             resultSizeOut[0] = collisionSize;
@@ -164,7 +175,7 @@ public class JavaSIMDBackend implements INativeBackend {
     static class JavaSIMD {
         private static final double SCALE = 64.0;
         private static final double WORLD_OFFSET = 50000000.0;
-        private static final long MASK_X = 0xFFFFFFFFFL; // 36位掩码
+        private static final long MASK_X = 0xFFFFFFFFFL;
         private static final VectorSpecies<Integer> SPECIES = IntVector.SPECIES_256;
 
         private int currentSize = -1;
@@ -177,14 +188,19 @@ public class JavaSIMDBackend implements INativeBackend {
         public void ensureSize(int n) {
             if (n > currentSize) {
                 int alloc = Math.max(n, currentSize == -1 ? n : currentSize * 2);
-                sortKeys = new long[alloc]; auxKeys = new long[alloc];
-                ids = new int[alloc]; auxIds = new int[alloc];
+                sortKeys = new long[alloc];
+                auxKeys = new long[alloc];
+                ids = new int[alloc];
+                auxIds = new int[alloc];
 
-                sMinX = new int[alloc]; sMinY = new int[alloc]; sMinZ = new int[alloc];
-                sMaxX = new int[alloc]; sMaxY = new int[alloc]; sMaxZ = new int[alloc];
+                sMinX = new int[alloc];
+                sMinY = new int[alloc];
+                sMinZ = new int[alloc];
+                sMaxX = new int[alloc];
+                sMaxY = new int[alloc];
+                sMaxZ = new int[alloc];
 
                 quantizedData = new int[alloc * 6];
-
                 sOriginalIDs = new int[alloc];
                 runIndexPerItem = new int[alloc];
                 runStarts = new int[alloc + 2];
@@ -203,8 +219,12 @@ public class JavaSIMDBackend implements INativeBackend {
             IntStream.range(0, entityCount).parallel().forEach(i -> {
                 ids[i] = i;
 
-                double dMinX = aabbs[i * 6 + 0]; double dMinY = aabbs[i * 6 + 1]; double dMinZ = aabbs[i * 6 + 2];
-                double dMaxX = aabbs[i * 6 + 3]; double dMaxY = aabbs[i * 6 + 4]; double dMaxZ = aabbs[i * 6 + 5];
+                double dMinX = aabbs[i * 6 + 0];
+                double dMinY = aabbs[i * 6 + 1];
+                double dMinZ = aabbs[i * 6 + 2];
+                double dMaxX = aabbs[i * 6 + 3];
+                double dMaxY = aabbs[i * 6 + 4];
+                double dMaxZ = aabbs[i * 6 + 5];
 
                 long qX = (long) ((dMinX + WORLD_OFFSET) * SCALE);
                 long gridZ = (long) ((dMinZ + WORLD_OFFSET) * invGridSize);
@@ -357,7 +377,6 @@ public class JavaSIMDBackend implements INativeBackend {
 
                 long laneMask = maskXYZ.toLong();
 
-                // Compress Table 位游走展开
                 while (laneMask != 0 && currentCollisions < K) {
                     int bitPos = Long.numberOfTrailingZeros(laneMask);
                     outA[writeOffset + currentCollisions] = idA;
@@ -376,7 +395,6 @@ public class JavaSIMDBackend implements INativeBackend {
                 if (!(maxXA <= sMinX[j] || minXA >= sMaxX[j] ||
                         maxYA <= sMinY[j] || minYA >= sMaxY[j] ||
                         maxZA <= sMinZ[j] || minZA >= sMaxZ[j])) {
-
                     outA[writeOffset + currentCollisions] = idA;
                     outB[writeOffset + currentCollisions] = sOriginalIDs[j];
                     currentCollisions++;
@@ -400,8 +418,12 @@ public class JavaSIMDBackend implements INativeBackend {
                     dstKeys[idx] = srcKeys[i];
                     dstIds[idx] = srcIds[i];
                 }
-                long[] tmpK = srcKeys; srcKeys = dstKeys; dstKeys = tmpK;
-                int[] tmpI = srcIds; srcIds = dstIds; dstIds = tmpI;
+                long[] tmpK = srcKeys;
+                srcKeys = dstKeys;
+                dstKeys = tmpK;
+                int[] tmpI = srcIds;
+                srcIds = dstIds;
+                dstIds = tmpI;
             }
         }
     }
