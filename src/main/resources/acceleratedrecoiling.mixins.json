@@ -4,13 +4,19 @@
   "package": "com.wiyuka.acceleratedrecoiling.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "EntityGetterMixin",
     "EntityMixin",
-    "LivingEntityMixin",
-    "ServerLevelMixin"
+    "ServerLevelMixin",
+    "ClimbableTagMixin",
+    "BatchedEntityStateMixin",
+    "BatchedSyncedStateMixin",
+    "BatchedScoreboardMixin",
+    "BatchedLevelAccess",
+    "BatchedLivingEntityMixin",
+    "BatchedMovementMixin",
+    "RealtimeGetterAccess",
+    "RealtimeSectionMixin"
   ],
-  "client": [
-  ],
+  "client": [],
   "injectors": {
     "defaultRequire": 1
   },

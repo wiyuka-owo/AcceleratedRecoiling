@@ -1,6 +1,8 @@
 /.gradle/
 /build/
-/algorithm/build/
 /run/
 /.idea/
+/.vscode/
+/scripts/
 /AcceleratedRecoiling-third-party/
+/docs/

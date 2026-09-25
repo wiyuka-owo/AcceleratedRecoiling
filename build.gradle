@@ -1,75 +1,8 @@
-buildscript {
-    repositories {
-        mavenCentral()
-    }
-    dependencies {
-        classpath 'org.ow2.asm:asm:9.6'
-    }
-}
-
 plugins {
     id 'java-library'
     id 'maven-publish'
     id 'idea'
     id 'net.neoforged.moddev' version '2.0.115'
-}
-
-tasks.withType(JavaCompile).configureEach {
-    options.compilerArgs.add('--enable-preview')
-    options.compilerArgs += "--add-modules"
-    options.compilerArgs += "jdk.incubator.vector"
-}
-
-import org.objectweb.asm.*
-import java.util.jar.*
-
-jar.doLast {
-    File jarFile = archiveFile.get().asFile
-    println "正在移除预览版标记: ${jarFile.name}..."
-
-    File tempFile = new File(jarFile.parent, jarFile.name + ".temp")
-
-    try (JarFile jar = new JarFile(jarFile);
-         JarOutputStream jos = new JarOutputStream(new FileOutputStream(tempFile))) {
-
-        Enumeration<JarEntry> entries = jar.entries()
-        while (entries.hasMoreElements()) {
-            JarEntry entry = entries.nextElement()
-            InputStream is = jar.getInputStream(entry)
-
-            if (!entry.getName().endsWith(".class")) {
-                jos.putNextEntry(new JarEntry(entry.getName()))
-                is.transferTo(jos)
-                continue
-            }
-
-            ClassReader cr = new ClassReader(is)
-            ClassWriter cw = new ClassWriter(0)
-
-            ClassVisitor cv = new ClassVisitor(Opcodes.ASM9, cw) {
-                @Override
-                void visit(int version, int access, String name, String signature, String superName, String[] interfaces) {
-                    int newVersion = version & ~Opcodes.V_PREVIEW
-                    super.visit(newVersion, access, name, signature, superName, interfaces)
-                }
-            }
-
-            cr.accept(cv, 0)
-
-            JarEntry newEntry = new JarEntry(entry.getName())
-            jos.putNextEntry(newEntry)
-            jos.write(cw.toByteArray())
-        }
-    }
-
-    if (jarFile.delete()) {
-        if (!tempFile.renameTo(jarFile)) {
-            throw new RuntimeException("无法重命名临时文件！")
-        }
-        println "预览版标记移除成功！"
-    } else {
-        throw new RuntimeException("无法删除原始 Jar 文件！")
-    }
 }
 
 version = mod_version
@@ -97,14 +30,12 @@ neoForge {
     runs {
         client {
             client()
-            jvmArgument("--enable-preview")
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         }
 
         server {
             server()
             programArgument '--nogui'
-            jvmArgument("--enable-preview")
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         }
 
@@ -130,20 +61,6 @@ sourceSets.main.resources { srcDir 'src/generated/resources' }
 
 tasks.named('createMinecraftArtifacts') {
     dependsOn 'generateModMetadata'
-}
-
-dependencies {
-    def joclVersion = "2.0.5"
-    implementation project(':algorithm')
-    additionalRuntimeClasspath project(':algorithm')
-    implementation "org.jocl:jocl:${joclVersion}"
-    additionalRuntimeClasspath "org.jocl:jocl:${joclVersion}"
-    jarJar(group: 'org.jocl', name: 'jocl', version: "[${joclVersion},)")
-}
-
-tasks.named('jar').configure {
-    dependsOn ':algorithm:compileJava'
-    from project(':algorithm').layout.buildDirectory.dir('classes/java/main')
 }
 
 var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {
@@ -187,7 +104,4 @@ idea {
     }
 }
 
-def cppScript = file('cpp-build.gradle')
-if (cppScript.exists()) {
-    apply from: cppScript
-}
+apply from: 'realtime-native.gradle'
