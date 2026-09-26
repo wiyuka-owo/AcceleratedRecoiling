@@ -1,0 +1,135 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'mod_version to build (also used as the release tag). Leave empty to read gradle.properties.'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Resolve version and tag
+        id: version
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          from_properties=$(grep -E '^mod_version=' gradle.properties | head -n1 | cut -d= -f2- | tr -d '[:space:]')
+          if [ -z "$from_properties" ]; then
+            echo "mod_version not found in gradle.properties" >&2
+            exit 1
+          fi
+
+          if [ "$EVENT_NAME" = "push" ]; then
+            version="$GITHUB_REF_NAME"
+          elif [ -n "${INPUT_VERSION:-}" ]; then
+            version="$INPUT_VERSION"
+          else
+            version="v$from_properties"
+          fi
+
+          {
+            echo "version=$version"
+            echo "tag=$version"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "version = $version (gradle.properties: $from_properties)"
+          echo "tag     = $version"
+
+      - name: Check native toolchain release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          toolchain=$(grep -E '^cpp_toolchain_version=' gradle.properties | head -n1 | cut -d= -f2- | tr -d '[:space:]')
+          echo "cpp_toolchain_version = $toolchain"
+
+          if ! gh release view "$toolchain" --repo wiyuka-owo/AcceleratedRecoiling > /dev/null; then
+            echo "Native toolchain release '$toolchain' not found in wiyuka-owo/AcceleratedRecoiling." >&2
+            echo "Publish it before releasing." >&2
+            exit 1
+          fi
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          # gradlew is stored with CRLF line endings, so bash cannot exec it directly
+          # (shebang becomes "sh\r"). Invoke the .bat wrapper through cmd instead.
+          cmd //c "gradlew.bat clean jar \"-Pmod_version=${{ steps.version.outputs.version }}\" -Porg.gradle.jvmargs=-Xmx4G --no-daemon --stacktrace"
+
+      - name: Verify artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          jar=$(ls build/libs/*.jar | head -n1)
+          if [ -z "$jar" ]; then
+            echo "No jar produced" >&2
+            exit 1
+          fi
+          echo "Artifact: $jar ($(du -h "$jar" | cut -f1))"
+
+          listing=$(unzip -l "$jar")
+          natives=$(echo "$listing" | grep 'natives/' || true)
+          if [ -z "$natives" ]; then
+            echo "Jar contains no natives/, native build did not run" >&2
+            exit 1
+          fi
+          echo "$natives"
+
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceleratedrecoiling
+          path: build/libs/*.jar
+          if-no-files-found: error
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          jar=$(ls build/libs/*.jar | head -n1)
+          echo "Releasing $TAG from $GITHUB_SHA (mod_version=$VERSION)"
+
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG exists, uploading asset"
+            gh release upload "$TAG" "$jar" --clobber
+          else
+            echo "Creating release $TAG"
+            gh release create "$TAG" "$jar" --title "$TAG" --notes "Built from $GITHUB_SHA with mod_version=$VERSION."
+          fi
