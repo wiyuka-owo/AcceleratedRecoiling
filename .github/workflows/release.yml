@@ -48,16 +48,19 @@ jobs:
           fi
 
           if [ "$EVENT_NAME" = "push" ]; then
-            version="$GITHUB_REF_NAME"
+            tag="$GITHUB_REF_NAME"
+            version="${tag#v}"
           elif [ -n "${INPUT_VERSION:-}" ]; then
-            version="$INPUT_VERSION"
+            version="${INPUT_VERSION#v}"
+            tag="v$version"
           else
-            version="v$from_properties"
+            version="$from_properties"
+            tag="v$version"
           fi
 
           {
             echo "version=$version"
-            echo "tag=$version"
+            echo "tag=$tag"
           } >> "$GITHUB_OUTPUT"
 
           echo "version = $version (gradle.properties: $from_properties)"
