@@ -88,18 +88,23 @@ jobs:
           set -euo pipefail
           # gradlew is stored with CRLF line endings, so bash cannot exec it directly
           # (shebang becomes "sh\r"). Invoke the .bat wrapper through cmd instead.
-          cmd //c "gradlew.bat clean jar \"-Pmod_version=${{ steps.version.outputs.version }}\" -Porg.gradle.jvmargs=-Xmx4G --no-daemon --stacktrace"
+          # No quotes around -P: cmd passes them through literally, and Gradle then
+          # treats '"-Pmod_version=..."' as a task name.
+          cmd //c "gradlew.bat clean jar -Pmod_version=${{ steps.version.outputs.version }} -Porg.gradle.jvmargs=-Xmx4G --no-daemon --stacktrace"
 
       - name: Verify artifact
         shell: bash
         run: |
           set -euo pipefail
 
-          jar=$(ls build/libs/*.jar | head -n1)
-          if [ -z "$jar" ]; then
+          # nullglob so an unmatched glob expands to nothing instead of the literal pattern
+          shopt -s nullglob
+          jars=(build/libs/*.jar)
+          if [ ${#jars[@]} -eq 0 ]; then
             echo "No jar produced" >&2
             exit 1
           fi
+          jar="${jars[0]}"
           echo "Artifact: $jar ($(du -h "$jar" | cut -f1))"
 
           listing=$(unzip -l "$jar")
@@ -126,7 +131,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          jar=$(ls build/libs/*.jar | head -n1)
+          shopt -s nullglob
+          jars=(build/libs/*.jar)
+          if [ ${#jars[@]} -eq 0 ]; then
+            echo "No jar produced" >&2
+            exit 1
+          fi
+          jar="${jars[0]}"
           echo "Releasing $TAG from $GITHUB_SHA (mod_version=$VERSION)"
 
           if gh release view "$TAG" > /dev/null 2>&1; then
