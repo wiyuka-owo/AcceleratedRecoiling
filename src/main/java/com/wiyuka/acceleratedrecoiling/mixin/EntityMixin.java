@@ -1,6 +1,7 @@
 package com.wiyuka.acceleratedrecoiling.mixin;
 
 import com.wiyuka.acceleratedrecoiling.natives.realtime.IndexedEntity;
+import com.wiyuka.acceleratedrecoiling.natives.realtime.PushableMemoryEntity;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.RealtimeSection;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -40,6 +41,10 @@ public abstract class EntityMixin implements IndexedEntity {
     public void ar$collisionStateDirty() {
         if (ar$section != null) {
             ar$section.stateDirty(ar$sectionSlot);
+        }
+        // 使isPushable缓存失效
+        if (this instanceof PushableMemoryEntity memo) {
+            memo.ar$invalidatePushable();
         }
     }
 

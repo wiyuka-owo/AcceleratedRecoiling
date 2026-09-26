@@ -135,10 +135,14 @@ public final class BatchedRules {
         }
 
         BlockState state = ((IndexedEntity) entity).ar$cachedBlockState();
-        if (BatchDiagnostics.ENABLED && state == null) {
-            BatchDiagnostics.coldStates++;
+        if (state == null) {
+            if (BatchDiagnostics.ENABLED) {
+                BatchDiagnostics.coldStates++;
+            }
+            // 查询getInBlockState以获得与原版相同的blockstate判定
+            state = entity.getInBlockState();
         }
-        if (state == null || state.getClass() != BlockState.class || !PLAIN_BLOCK.get(state.getBlock().getClass())) {
+        if (state.getClass() != BlockState.class || !PLAIN_BLOCK.get(state.getBlock().getClass())) {
             return VANILLA_CALLBACKS;
         }
 
