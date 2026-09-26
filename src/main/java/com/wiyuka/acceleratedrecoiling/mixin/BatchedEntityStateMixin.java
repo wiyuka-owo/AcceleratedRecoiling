@@ -18,7 +18,7 @@ public class BatchedEntityStateMixin {
         ((IndexedEntity) this).ar$collisionStateDirty();
     }
 
-    @Inject(method = "startRiding(Lnet/minecraft/world/entity/Entity;Z)Z", at = { @At("HEAD"), @At("RETURN") })
+    @Inject(method = "startRiding(Lnet/minecraft/world/entity/Entity;ZZ)Z", at = { @At("HEAD"), @At("RETURN") })
     private void ar$mounted(CallbackInfoReturnable<Boolean> cir) {
         ((IndexedEntity) this).ar$collisionStateDirty();
     }

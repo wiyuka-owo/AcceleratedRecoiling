@@ -11,7 +11,7 @@ import net.minecraft.util.AbortableIterationConsumer;
 import net.minecraft.util.profiling.Profiler;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.level.GameRules;
+import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.entity.EntitySectionStorage;
 import net.minecraft.world.level.entity.LevelEntityGetterAdapter;
 import net.minecraft.world.phys.AABB;
@@ -247,7 +247,7 @@ public final class BatchedCollisions {
 
         boolean damaged = false;
         if (total > 0) {
-            int limit = level.getGameRules().getInt(GameRules.RULE_MAX_ENTITY_CRAMMING);
+            int limit = level.getGameRules().get(GameRules.MAX_ENTITY_CRAMMING);
             if (limit > 0 && total > limit - 1 && source.getRandom().nextInt(4) == 0) {
                 source.hurtServer(level, source.damageSources().cramming(), 6.0F);
                 damaged = true;
