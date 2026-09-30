@@ -9,7 +9,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.Locale;
 
 public final class RealtimeNative {
-    private static final int NATIVE_ABI_VERSION = 8;
+    private static final int NATIVE_ABI_VERSION = 10;
 
     private static boolean attempted;
     private static volatile boolean loaded;
@@ -93,6 +93,10 @@ public final class RealtimeNative {
         return kernel.quantized && size >= quantizationThreshold;
     }
 
+    static boolean indexSection(int size) {
+        return kernel != Kernel.SCALAR && SpatialIndex.enabled(size);
+    }
+
     public static String kernelName() {
         return kernel.configName;
     }
@@ -102,7 +106,7 @@ public final class RealtimeNative {
     static native long queryBatch(ByteBuffer sectionDescriptors, int sectionCount, ByteBuffer output,
             int sourceSection, int sourceSlot, double sourceX, double sourceZ,
             double minX, double minY, double minZ, double maxX, double maxY, double maxZ,
-            boolean retainCollisions);
+            boolean retainCollisions, boolean computeImpulses);
 
     private enum Kernel {
         AUTO(-1, "auto", false),
