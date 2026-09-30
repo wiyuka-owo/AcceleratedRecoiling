@@ -10,6 +10,37 @@ import net.minecraft.world.phys.AABB;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 
 public final class RealtimeSection {
+    private enum EntityField {
+        BOUNDS_MIN_X,
+        BOUNDS_MIN_Y,
+        BOUNDS_MIN_Z,
+        BOUNDS_MAX_X,
+        BOUNDS_MAX_Y,
+        BOUNDS_MAX_Z,
+        POS_X,
+        POS_Z,
+        FLAGS;
+
+        int byteOffset(int stride, int slot) {
+            return (ordinal() * stride + slot) * Double.BYTES;
+        }
+
+        int quantizedByteOffset(int stride, int slot) {
+            int quantizedStart = ENTITY_FIELD_COUNT * stride * Double.BYTES;
+            return quantizedStart + (ordinal() * stride + slot) * Integer.BYTES;
+        }
+
+        boolean isMinimumBound() {
+            return ordinal() < BOUNDS_MAX_X.ordinal();
+        }
+    }
+
+    private static final int ENTITY_FIELD_COUNT = EntityField.values().length;
+    private static final EntityField[] BOUNDS_FIELDS = {
+            EntityField.BOUNDS_MIN_X, EntityField.BOUNDS_MIN_Y, EntityField.BOUNDS_MIN_Z,
+            EntityField.BOUNDS_MAX_X, EntityField.BOUNDS_MAX_Y, EntityField.BOUNDS_MAX_Z
+    };
+
     public static final class View {
         private final Entity[] entities;
         private final BlockPos sectionPosition;
@@ -17,6 +48,7 @@ public final class RealtimeSection {
         private final long address;
         private final int stride;
         private final boolean quantized;
+        private final SpatialIndex spatial;
         private int count;
         private int liveCount;
         private int pins;
@@ -30,6 +62,7 @@ public final class RealtimeSection {
             this.count = count;
             this.liveCount = count;
             this.quantized = quantized;
+            this.spatial = RealtimeNative.indexSection(count) ? new SpatialIndex(stride, sectionPosition) : null;
         }
 
         public Entity[] entities() {
@@ -50,6 +83,14 @@ public final class RealtimeSection {
 
         public int count() {
             return count;
+        }
+
+        public long spatialAddress() {
+            return spatial == null ? 0 : spatial.address();
+        }
+
+        public long coincidentAddress(double x, double z) {
+            return spatial == null ? 0 : spatial.coincidentAddress(x, z);
         }
 
         public View retain() {
@@ -87,17 +128,18 @@ public final class RealtimeSection {
     public void prepareBatch(long epoch) {
         if (policyEpoch != epoch) {
             stateChanges.clear();
-            for (int i = 0; i < view.count; i++) {
-                if (view.entities[i] == null) {
+            for (int slot = 0; slot < view.count; slot++) {
+                if (view.entities[slot] == null) {
                     continue;
                 }
-                stateQueued[i] = true;
-                stateChanges.add(i);
+                stateQueued[slot] = true;
+                stateChanges.add(slot);
             }
             policyEpoch = epoch;
         }
-        for (int i = 0; i < stateChanges.size(); i++) {
-            int slot = stateChanges.getInt(i);
+
+        for (int changeIndex = 0; changeIndex < stateChanges.size(); changeIndex++) {
+            int slot = stateChanges.getInt(changeIndex);
             Entity entity = view.entities[slot];
             stateQueued[slot] = false;
             if (entity == null) {
@@ -106,12 +148,22 @@ public final class RealtimeSection {
             if (BatchDiagnostics.ENABLED) {
                 BatchDiagnostics.preparedEntities++;
             }
-            int plane = view.stride * 8;
-            view.boxes.putDouble(6 * plane + slot * 8, entity.getX());
-            view.boxes.putDouble(7 * plane + slot * 8, entity.getZ());
-            view.boxes.putDouble(8 * plane + slot * 8, BatchedRules.classify(entity));
+            double x = entity.getX();
+            double z = entity.getZ();
+            int flag = BatchedRules.classify(entity);
+            writeState(slot, x, z, flag);
         }
         stateChanges.clear();
+    }
+
+    private void writeState(int slot, double x, double z, double flag) {
+        view.boxes.putDouble(EntityField.POS_X.byteOffset(view.stride, slot), x);
+        view.boxes.putDouble(EntityField.POS_Z.byteOffset(view.stride, slot), z);
+        view.boxes.putDouble(EntityField.FLAGS.byteOffset(view.stride, slot), flag);
+
+        if (view.spatial != null) {
+            view.spatial.updateState(slot, x, z, flag);
+        }
     }
 
     public boolean softOnly(EntitySection<?> section) {
@@ -133,7 +185,8 @@ public final class RealtimeSection {
             nonSoft++;
         }
         if (!(object instanceof Entity entity) || !ordered || dirty || view == null || view.pins != 0
-                || view.count == view.stride || RealtimeNative.quantizeSection(view.count + 1) != view.quantized) {
+                || view.count == view.stride || RealtimeNative.quantizeSection(view.count + 1) != view.quantized
+                || RealtimeNative.indexSection(view.count + 1) == (view.spatial == null)) {
             dirty = true;
             return;
         }
@@ -183,16 +236,17 @@ public final class RealtimeSection {
         // avoid l1 cache-set aliasing between soa planes
         if (stride >= 512) stride = Math.addExact(stride, 16);
         var entities = new Entity[stride];
-        for (int i = 0; i < entries.length; i++) {
-            if (!(entries[i] instanceof Entity e)) {
+        for (int slot = 0; slot < entries.length; slot++) {
+            if (!(entries[slot] instanceof Entity entity)) {
                 return null;
             }
-            entities[i] = e;
+            entities[slot] = entity;
         }
+
         boolean quantized = RealtimeNative.quantizeSection(entries.length);
-        int bytesPerEntity = 9 * Double.BYTES;
+        int bytesPerEntity = ENTITY_FIELD_COUNT * Double.BYTES;
         if (quantized) {
-            bytesPerEntity += 6 * Integer.BYTES;
+            bytesPerEntity += BOUNDS_FIELDS.length * Integer.BYTES;
         }
         ByteBuffer boxes = ByteBuffer.allocateDirect(Math.multiplyExact(stride, bytesPerEntity))
                 .order(ByteOrder.nativeOrder());
@@ -206,8 +260,8 @@ public final class RealtimeSection {
         dirty = false;
         stateQueued = new boolean[entities.length];
         stateChanges.clear();
-        for (int i = 0; i < entries.length; i++) {
-            IndexedEntity indexed = (IndexedEntity) entities[i];
+        for (int slot = 0; slot < entries.length; slot++) {
+            IndexedEntity indexed = (IndexedEntity) entities[slot];
             int oldSlot = indexed.ar$sectionSlot();
 
             boolean cached =
@@ -215,19 +269,17 @@ public final class RealtimeSection {
                  && indexed.ar$section() == this
                  && oldSlot >= 0
                  && oldSlot < previous.count
-                 && previous.entities[oldSlot] == entities[i];
+                 && previous.entities[oldSlot] == entities[slot];
 
-            indexed.ar$bindSection(this, i);
-            writeBox(i, entities[i].getBoundingBox());
+            indexed.ar$bindSection(this, slot);
+            writeBox(slot, entities[slot].getBoundingBox());
             if (cached && !previousQueued[oldSlot]) {
-                for (int p = 6; p < 9; p++) {
-                    boxes.putDouble(
-                            (p * stride + i) * 8,
-                            previous.boxes.getDouble((p * previous.stride + oldSlot) * 8)
-                    );
-                }
+                double x = previous.boxes.getDouble(EntityField.POS_X.byteOffset(previous.stride, oldSlot));
+                double z = previous.boxes.getDouble(EntityField.POS_Z.byteOffset(previous.stride, oldSlot));
+                double flag = previous.boxes.getDouble(EntityField.FLAGS.byteOffset(previous.stride, oldSlot));
+                writeState(slot, x, z, flag);
             } else {
-                stateDirty(i);
+                stateDirty(slot);
             }
         }
         return view;
@@ -242,20 +294,19 @@ public final class RealtimeSection {
     }
 
     private void clearBox(int slot) {
-        int plane = view.stride * 8;
-        for (int p = 0; p < 6; p++) {
-            view.boxes.putDouble(
-                    p * plane + slot * 8,
-                    p < 3 ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY);
+        if (view.spatial != null) {
+            view.spatial.remove(slot);
+        }
+
+        for (EntityField field : BOUNDS_FIELDS) {
+            double emptyBound = field.isMinimumBound() ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY;
+            view.boxes.putDouble(field.byteOffset(view.stride, slot), emptyBound);
         }
 
         if (view.quantized) {
-            int offset = 9 * plane + slot * Integer.BYTES;
-            int step = view.stride * Integer.BYTES;
-            for (int p = 0; p < 6; p++) {
-                view.boxes.putInt(
-                        offset + p * step,
-                        p < 3 ? Integer.MAX_VALUE : Integer.MIN_VALUE);
+            for (EntityField field : BOUNDS_FIELDS) {
+                int emptyBound = field.isMinimumBound() ? Integer.MAX_VALUE : Integer.MIN_VALUE;
+                view.boxes.putInt(field.quantizedByteOffset(view.stride, slot), emptyBound);
             }
         }
     }
@@ -268,30 +319,37 @@ public final class RealtimeSection {
         double maxY = box.maxY;
         double maxZ = box.maxZ;
         ByteBuffer buffer = view.boxes;
-        int offset = slot * Double.BYTES;
-        int planeBytes = view.stride * Double.BYTES;
-        buffer.putDouble(offset, minX);
-        buffer.putDouble(planeBytes + offset, minY);
-        buffer.putDouble(2 * planeBytes + offset, minZ);
-        buffer.putDouble(3 * planeBytes + offset, maxX);
-        buffer.putDouble(4 * planeBytes + offset, maxY);
-        buffer.putDouble(5 * planeBytes + offset, maxZ);
-        if (view.quantized) {
-            int quantizedOffset = 9 * planeBytes + slot * Integer.BYTES;
-            int quantizedPlaneBytes = view.stride * Integer.BYTES;
-            if (Double.isFinite(minX) && Double.isFinite(minY) && Double.isFinite(minZ) && Double.isFinite(maxX)
-                    && Double.isFinite(maxY) && Double.isFinite(maxZ)) {
-                buffer.putInt(quantizedOffset, quantize(minX));
-                buffer.putInt(quantizedOffset + quantizedPlaneBytes, quantize(minY));
-                buffer.putInt(quantizedOffset + 2 * quantizedPlaneBytes, quantize(minZ));
-                buffer.putInt(quantizedOffset + 3 * quantizedPlaneBytes, quantize(maxX));
-                buffer.putInt(quantizedOffset + 4 * quantizedPlaneBytes, quantize(maxY));
-                buffer.putInt(quantizedOffset + 5 * quantizedPlaneBytes, quantize(maxZ));
-            } else {
-                for (int j = 0; j < 6; j++) {
-                    buffer.putInt(quantizedOffset + j * quantizedPlaneBytes,
-                            j < 3 ? Integer.MIN_VALUE : Integer.MAX_VALUE);
-                }
+        int stride = view.stride;
+
+        buffer.putDouble(EntityField.BOUNDS_MIN_X.byteOffset(stride, slot), minX);
+        buffer.putDouble(EntityField.BOUNDS_MIN_Y.byteOffset(stride, slot), minY);
+        buffer.putDouble(EntityField.BOUNDS_MIN_Z.byteOffset(stride, slot), minZ);
+        buffer.putDouble(EntityField.BOUNDS_MAX_X.byteOffset(stride, slot), maxX);
+        buffer.putDouble(EntityField.BOUNDS_MAX_Y.byteOffset(stride, slot), maxY);
+        buffer.putDouble(EntityField.BOUNDS_MAX_Z.byteOffset(stride, slot), maxZ);
+
+        if (view.quantized || view.spatial != null) {
+            boolean finite = Double.isFinite(minX) && Double.isFinite(minY) && Double.isFinite(minZ)
+                    && Double.isFinite(maxX) && Double.isFinite(maxY) && Double.isFinite(maxZ);
+            int quantizedMinX = finite ? quantize(minX) : Integer.MIN_VALUE;
+            int quantizedMinY = finite ? quantize(minY) : Integer.MIN_VALUE;
+            int quantizedMinZ = finite ? quantize(minZ) : Integer.MIN_VALUE;
+            int quantizedMaxX = finite ? quantize(maxX) : Integer.MAX_VALUE;
+            int quantizedMaxY = finite ? quantize(maxY) : Integer.MAX_VALUE;
+            int quantizedMaxZ = finite ? quantize(maxZ) : Integer.MAX_VALUE;
+
+            if (view.quantized) {
+                buffer.putInt(EntityField.BOUNDS_MIN_X.quantizedByteOffset(stride, slot), quantizedMinX);
+                buffer.putInt(EntityField.BOUNDS_MIN_Y.quantizedByteOffset(stride, slot), quantizedMinY);
+                buffer.putInt(EntityField.BOUNDS_MIN_Z.quantizedByteOffset(stride, slot), quantizedMinZ);
+                buffer.putInt(EntityField.BOUNDS_MAX_X.quantizedByteOffset(stride, slot), quantizedMaxX);
+                buffer.putInt(EntityField.BOUNDS_MAX_Y.quantizedByteOffset(stride, slot), quantizedMaxY);
+                buffer.putInt(EntityField.BOUNDS_MAX_Z.quantizedByteOffset(stride, slot), quantizedMaxZ);
+            }
+
+            if (view.spatial != null) {
+                view.spatial.updateBounds(slot, quantizedMinX, quantizedMinY, quantizedMinZ,
+                        quantizedMaxX, quantizedMaxY, quantizedMaxZ, finite);
             }
         }
     }

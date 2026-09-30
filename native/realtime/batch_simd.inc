@@ -1,3 +1,37 @@
+AR_TARGET
+static void AR_STORE_VALUES(std::int64_t* output, decltype(AR_SETD(0.0)) values, unsigned mask) {
+    if (mask == (1u << AR_DLANES) - 1) {
+        AR_STORE_BITS(output, values);
+        return;
+    }
+
+    double lanes[AR_DLANES];
+    AR_STORED(lanes, values);
+    const auto& selected = compressTable.lanes[mask];
+    const int count = std::popcount(mask);
+    for (int index = 0; index < count; ++index) {
+        output[index] = std::bit_cast<std::int64_t>(lanes[selected[index]]);
+    }
+}
+
+AR_TARGET
+static void AR_CALCULATE_IMPULSES(int count, std::int64_t* outputX, std::int64_t* outputZ) {
+    const auto one = AR_SETD(1.0);
+    const auto strength = AR_SETD(static_cast<double>(0.05f));
+    int index = 0;
+    for (; index <= count - AR_DLANES; index += AR_DLANES) {
+        const auto deltaX = AR_LOAD_BITS(outputX + index);
+        const auto deltaZ = AR_LOAD_BITS(outputZ + index);
+        const auto distance = AR_SQRT(AR_MAX(AR_ABS(deltaX), AR_ABS(deltaZ)));
+        const auto scale = AR_MIN(AR_DIV(one, distance), one);
+        const auto impulseX = AR_MUL(AR_MUL(AR_DIV(deltaX, distance), scale), strength);
+        const auto impulseZ = AR_MUL(AR_MUL(AR_DIV(deltaZ, distance), scale), strength);
+        AR_STORE_BITS(outputX + index, impulseX);
+        AR_STORE_BITS(outputZ + index, impulseZ);
+    }
+    scalarImpulses(count - index, outputX + index, outputZ + index);
+}
+
 template<bool Quantized, bool RetainCollisions>
 AR_TARGET
 static std::int64_t AR_BATCH(const Section* sections, int sectionCount, int entryCount,
@@ -32,10 +66,18 @@ static std::int64_t AR_BATCH(const Section* sections, int sectionCount, int entr
 
     for (int section = 0; section < sectionCount; ++section) {
         const auto& currentSection = sections[section];
+        if (currentSection.spatial && currentSection.coincident) {
+            if (!indexedSection<RetainCollisions>(currentSection, section, entryCount,
+                    output, query, collisionCount, pushCount)) {
+                return -1;
+            }
+            continue;
+        }
         const int stride = currentSection.stride;
         const auto* entityData = reinterpret_cast<const double*>(currentSection.address);
         const auto* quantizedBoxes = reinterpret_cast<const std::int32_t*>(entityData + QUANTIZED_BOXES * stride);
         const bool useQuantization = Quantized && currentSection.count >= MIN_QUANTIZED_ENTITIES;
+        const int sourceSlot = section == query.sourceSection ? query.sourceSlot : -1;
 
         int blockStart = 0;
         for (; blockStart <= currentSection.count - AR_ILANES; blockStart += AR_ILANES) {
@@ -74,13 +116,13 @@ static std::int64_t AR_BATCH(const Section* sections, int sectionCount, int entr
                 confirmedMask = candidateMask & ~(boundaryMask | sentinelMask);
             }
 
+            if (sourceSlot >= blockStart && sourceSlot < blockStart + AR_ILANES) {
+                candidateMask &= ~(1u << (sourceSlot - blockStart));
+            }
+
             for (int laneOffset = 0; laneOffset < AR_ILANES; laneOffset += AR_DLANES) {
                 const int firstSlot = blockStart + laneOffset;
                 unsigned collisionMask = (candidateMask >> laneOffset) & doubleLaneMask;
-                if (section == query.sourceSection
-                        && query.sourceSlot >= firstSlot && query.sourceSlot < firstSlot + AR_DLANES) {
-                    collisionMask &= ~(1u << (query.sourceSlot - firstSlot));
-                }
                 if (collisionMask == 0) {
                     continue;
                 }
@@ -128,8 +170,19 @@ static std::int64_t AR_BATCH(const Section* sections, int sectionCount, int entr
                 if constexpr (RetainCollisions) {
                     AR_STORE(output + collisionCount, firstHit, collisionMask);
                 }
-                AR_STORE(output + entryCount + pushCount, firstHit, pushMask);
                 collisionCount += std::popcount(collisionMask);
+
+                if (pushMask == 0) {
+                    continue;
+                }
+
+                AR_STORE(output + entryCount + pushCount, firstHit, pushMask);
+                if (query.computeImpulses) {
+                    const auto deltaX = AR_SUB(sourceX, candidateX);
+                    const auto deltaZ = AR_SUB(sourceZ, candidateZ);
+                    AR_STORE_VALUES(output + IMPULSE_X * entryCount + pushCount, deltaX, pushMask);
+                    AR_STORE_VALUES(output + IMPULSE_Z * entryCount + pushCount, deltaZ, pushMask);
+                }
                 pushCount += std::popcount(pushMask);
             }
         }

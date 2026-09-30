@@ -1,8 +1,9 @@
 def toolchainVersion = providers.gradleProperty('cpp_toolchain_version').get()
 def toolchainDirectory = layout.buildDirectory.dir("cpptoolchain/${toolchainVersion}")
 def localArchive = providers.gradleProperty('cppToolchainArchive')
-def nativeSource = toolchainDirectory.map { it.dir('native/realtime') }
+def nativeSource = providers.provider { layout.projectDirectory.dir('native/realtime') }
 def nativeHeaders = toolchainDirectory.map { it.dir('third_party/jni') }
+def nativeBuildRoot = layout.buildDirectory.dir("native-local/${toolchainVersion}")
 def nativeResources = layout.buildDirectory.dir('generated/realtime-natives')
 
 def osName = System.getProperty('os.name').toLowerCase(Locale.ROOT)
@@ -43,7 +44,7 @@ def compileTasks = [:]
 def libraries = [:]
 targets.each { platform, target ->
     def taskSuffix = platform.tokenize('-').collect { it.capitalize() }.join('')
-    def buildDirectory = layout.buildDirectory.dir("native/${toolchainVersion}/${platform}")
+    def buildDirectory = nativeBuildRoot.map { it.dir(platform) }
     def library = buildDirectory.map { it.file(target[1]) }
     def toolsDirectory = toolchainDirectory.get().dir('env/bin').asFile
     def testEnabled = platform == hostPlatform
@@ -92,7 +93,7 @@ tasks.register('compileRealtimeNative') {
 tasks.register('testRealtimeKernel', Exec) {
     group = 'verification'
     dependsOn compileTasks[hostPlatform]
-    commandLine layout.buildDirectory.file("native/${toolchainVersion}/${hostPlatform}/${windows ? 'RealtimeKernelTest.exe' : 'RealtimeKernelTest'}").get().asFile
+    commandLine nativeBuildRoot.get().file("${hostPlatform}/${windows ? 'RealtimeKernelTest.exe' : 'RealtimeKernelTest'}").asFile
 }
 
 def copyNativeLibraries = tasks.register('copyRealtimeNative', Sync) {
