@@ -1,4 +1,4 @@
-package com.wiyuka.acceleratedrecoiling.natives.realtime;
+package com.wiyuka.acceleratedrecoiling.natives.realtime.compat;
 
 import com.wiyuka.acceleratedrecoiling.AcceleratedRecoiling;
 import com.wiyuka.acceleratedrecoiling.mixin.LivingEntityDoPushInvoker;
