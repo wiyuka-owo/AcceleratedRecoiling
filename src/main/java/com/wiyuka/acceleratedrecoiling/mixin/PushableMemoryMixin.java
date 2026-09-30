@@ -2,9 +2,7 @@ package com.wiyuka.acceleratedrecoiling.mixin;
 
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
-import com.wiyuka.acceleratedrecoiling.natives.realtime.BatchDiagnostics;
-import com.wiyuka.acceleratedrecoiling.natives.realtime.BatchedRules;
-import com.wiyuka.acceleratedrecoiling.natives.realtime.PushableCache;
+import com.wiyuka.acceleratedrecoiling.natives.realtime.compat.BatchedRules;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.PushableMemoryEntity;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.RealtimeNative;
 import net.minecraft.world.entity.LivingEntity;
@@ -62,18 +60,7 @@ public abstract class PushableMemoryMixin implements PushableMemoryEntity {
 
     @Unique
     private boolean ar$hasClimbableCache(long epoch) {
-        boolean valid = ar$pushableValid && ar$pushableEpoch == epoch;
-        if (BatchDiagnostics.ENABLED) {
-            if (valid) {
-                PushableCache.holds++;
-            } else if (ar$pushableValid) {
-                PushableCache.epochMisses++;
-            } else {
-                PushableCache.misses++;
-            }
-        }
-
-        return valid;
+        return ar$pushableValid && ar$pushableEpoch == epoch;
     }
 
     @Unique
