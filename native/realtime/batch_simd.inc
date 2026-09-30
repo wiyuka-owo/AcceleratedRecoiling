@@ -68,7 +68,7 @@ static std::int64_t AR_BATCH(const Section* sections, int sectionCount, int entr
         const auto& currentSection = sections[section];
         if (currentSection.spatial && currentSection.coincident) {
             if (!indexedSection<RetainCollisions>(currentSection, section, entryCount,
-                    output, query, collisionCount, pushCount)) {
+                    output, query, quantizedQueryBounds, collisionCount, pushCount)) {
                 return -1;
             }
             continue;

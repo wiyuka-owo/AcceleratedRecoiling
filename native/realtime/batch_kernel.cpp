@@ -339,23 +339,44 @@ static Kernel cpuKernel() {
 
 #endif
 
+static Kernel unquantizedKernel(Kernel kernel) {
+    switch (kernel) {
+        case Kernel::QuantizedSSE2:
+            return Kernel::SSE2;
+        case Kernel::QuantizedAVX2:
+            return Kernel::AVX2;
+        case Kernel::QuantizedAVX512:
+            return Kernel::AVX512;
+        default:
+            return kernel;
+    }
+}
+
 bool supported(Kernel kernel) {
     if (kernel == Kernel::Scalar || kernel == Kernel::Auto) {
         return true;
     }
 
-    int value = static_cast<int>(kernel);
-    if (value >= 4) {
-        value -= 3;
-    }
-
-    return value >= 1 && value <= static_cast<int>(cpuKernel());
+    Kernel base = unquantizedKernel(kernel);
+    return base >= Kernel::SSE2 && base <= cpuKernel();
 }
 
 Kernel bestKernel(bool quantized) {
     Kernel result = cpuKernel();
-    return quantized && result != Kernel::Scalar
-            ? static_cast<Kernel>(static_cast<int>(result) + 3) : result;
+    if (!quantized) {
+        return result;
+    }
+
+    switch (result) {
+        case Kernel::SSE2:
+            return Kernel::QuantizedSSE2;
+        case Kernel::AVX2:
+            return Kernel::QuantizedAVX2;
+        case Kernel::AVX512:
+            return Kernel::QuantizedAVX512;
+        default:
+            return result;
+    }
 }
 
 const char* kernelName(Kernel kernel) {
@@ -392,13 +413,17 @@ static std::int64_t batchWithOutput(Kernel kernel, const Section* plan, int sect
         }
     }
 
-    if (static_cast<int>(kernel) >= 4) {
+    Kernel unquantized = unquantizedKernel(kernel);
+    if (kernel != unquantized) {
         bool hasQuantizedSection = false;
-        for (int s = 0; s < sectionCount; ++s) {
-            hasQuantizedSection |= plan[s].count >= MIN_QUANTIZED_ENTITIES;
+        for (int section = 0; section < sectionCount; ++section) {
+            if (plan[section].count >= MIN_QUANTIZED_ENTITIES) {
+                hasQuantizedSection = true;
+                break;
+            }
         }
         if (!hasQuantizedSection) {
-            kernel = static_cast<Kernel>(static_cast<int>(kernel) - 3);
+            kernel = unquantized;
         }
     }
 

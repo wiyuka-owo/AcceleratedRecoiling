@@ -1,6 +1,7 @@
-package com.wiyuka.acceleratedrecoiling.natives.realtime;
+package com.wiyuka.acceleratedrecoiling.natives.realtime.compat;
 
 import com.wiyuka.acceleratedrecoiling.AcceleratedRecoiling;
+import com.wiyuka.acceleratedrecoiling.natives.realtime.index.IndexedEntity;
 import java.util.concurrent.atomic.AtomicLong;
 import net.minecraft.core.Holder;
 import net.minecraft.util.ClassInstanceMultiMap;
@@ -127,7 +128,7 @@ public final class BatchedRules {
         return classify(entity, false);
     }
 
-    static int classify(Entity entity, boolean allowUncachedState) {
+    public static int classify(Entity entity, boolean allowUncachedState) {
         if (!plain(entity.getClass())) {
             return VANILLA_CALLBACKS;
         }
@@ -141,9 +142,6 @@ public final class BatchedRules {
 
         BlockState state = ((IndexedEntity) entity).ar$cachedBlockState();
         if (state == null) {
-            if (BatchDiagnostics.ENABLED) {
-                BatchDiagnostics.coldStates++;
-            }
             if (!allowUncachedState) {
                 return VANILLA_CALLBACKS;
             }

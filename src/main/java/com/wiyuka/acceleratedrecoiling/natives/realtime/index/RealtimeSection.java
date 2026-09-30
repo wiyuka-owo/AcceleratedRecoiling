@@ -1,5 +1,7 @@
-package com.wiyuka.acceleratedrecoiling.natives.realtime;
+package com.wiyuka.acceleratedrecoiling.natives.realtime.index;
 
+import com.wiyuka.acceleratedrecoiling.natives.realtime.RealtimeNative;
+import com.wiyuka.acceleratedrecoiling.natives.realtime.compat.BatchedRules;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import net.minecraft.core.BlockPos;
@@ -42,11 +44,11 @@ public final class RealtimeSection {
     };
 
     public static final class View {
-        private final Entity[] entities;
-        private final BlockPos sectionPosition;
+        public final Entity[] entities;
+        public final BlockPos sectionPosition;
+        public final long address;
+        public final int stride;
         private final ByteBuffer boxes;
-        private final long address;
-        private final int stride;
         private final boolean quantized;
         private final SpatialIndex spatial;
         private int count;
@@ -62,23 +64,9 @@ public final class RealtimeSection {
             this.count = count;
             this.liveCount = count;
             this.quantized = quantized;
-            this.spatial = RealtimeNative.indexSection(count) ? new SpatialIndex(stride, sectionPosition) : null;
-        }
-
-        public Entity[] entities() {
-            return entities;
-        }
-
-        public BlockPos sectionPosition() {
-            return sectionPosition;
-        }
-
-        public long address() {
-            return address;
-        }
-
-        public int stride() {
-            return stride;
+            this.spatial = SpatialIndex.enabled(count)
+                    ? new SpatialIndex(stride, sectionPosition)
+                    : null;
         }
 
         public int count() {
@@ -95,6 +83,7 @@ public final class RealtimeSection {
 
         public View retain() {
             pins++;
+
             return this;
         }
 
@@ -128,13 +117,16 @@ public final class RealtimeSection {
     public void prepareBatch(long epoch) {
         if (policyEpoch != epoch) {
             stateChanges.clear();
+
             for (int slot = 0; slot < view.count; slot++) {
                 if (view.entities[slot] == null) {
                     continue;
                 }
+
                 stateQueued[slot] = true;
                 stateChanges.add(slot);
             }
+
             policyEpoch = epoch;
         }
 
@@ -142,17 +134,17 @@ public final class RealtimeSection {
             int slot = stateChanges.getInt(changeIndex);
             Entity entity = view.entities[slot];
             stateQueued[slot] = false;
+
             if (entity == null) {
                 continue;
             }
-            if (BatchDiagnostics.ENABLED) {
-                BatchDiagnostics.preparedEntities++;
-            }
+
             double x = entity.getX();
             double z = entity.getZ();
             int flag = BatchedRules.classify(entity);
             writeState(slot, x, z, flag);
         }
+
         stateChanges.clear();
     }
 
@@ -170,13 +162,16 @@ public final class RealtimeSection {
         if (!softKnown) {
             nonSoft = 0;
             var iterator = section.getEntities().iterator();
+
             while (iterator.hasNext()) {
                 if (!BatchedRules.soft(iterator.next().getClass())) {
                     nonSoft++;
                 }
             }
+
             softKnown = true;
         }
+
         return nonSoft == 0;
     }
 
@@ -184,17 +179,29 @@ public final class RealtimeSection {
         if (softKnown && !BatchedRules.soft(object.getClass())) {
             nonSoft++;
         }
-        if (!(object instanceof Entity entity) || !ordered || dirty || view == null || view.pins != 0
-                || view.count == view.stride || RealtimeNative.quantizeSection(view.count + 1) != view.quantized
-                || RealtimeNative.indexSection(view.count + 1) == (view.spatial == null)) {
+
+        if (shouldRebuildView(object)) {
             dirty = true;
             return;
         }
+
+        Entity entity = (Entity) object;
         int slot = view.count++;
         view.liveCount++;
         view.entities[slot] = entity;
+
         ((IndexedEntity) entity).ar$bindSection(this, slot);
         update(slot, entity.getBoundingBox());
+    }
+
+    private boolean shouldRebuildView(Object object) {
+        return !(object instanceof Entity)
+                || !ordered
+                || dirty
+                || view.pins != 0
+                || view.count == view.stride
+                || RealtimeNative.quantizeSection(view.count + 1) != view.quantized
+                || SpatialIndex.enabled(view.count + 1) == (view.spatial == null);
     }
 
     public void removed(Object entity) {
@@ -203,13 +210,20 @@ public final class RealtimeSection {
         }
         if (entity instanceof IndexedEntity indexed) {
             int slot = indexed.ar$sectionSlot();
-            if (!ordered || dirty || view == null || view.pins != 0 || indexed.ar$section() != this || slot < 0
-                    || slot >= view.count || view.entities[slot] != entity) {
+
+            if (!ordered
+                    || dirty
+                    || view.pins != 0
+                    || indexed.ar$section() != this
+                    || slot < 0
+                    || slot >= view.count
+                    || view.entities[slot] != entity) {
                 dirty = true;
             } else {
                 view.entities[slot] = null;
                 view.liveCount--;
                 clearBox(slot);
+
                 if (view.count > 32 && view.liveCount < view.count - view.count / 4) {
                     dirty = true;
                 }
@@ -224,17 +238,22 @@ public final class RealtimeSection {
         if (!dirty) {
             return view;
         }
-        if (BatchDiagnostics.ENABLED) {
-            BatchDiagnostics.rebuilds++;
-        }
         View previous = view;
         boolean[] previousQueued = stateQueued;
         var entries = section.getEntities().toArray();
+
         int requiredCapacity = Math.addExact(entries.length, Math.max(1, entries.length / 4));
         int stride = 16;
-        while (stride < requiredCapacity) stride = Math.multiplyExact(stride, 2);
+
+        while (stride < requiredCapacity) {
+            stride = Math.multiplyExact(stride, 2);
+        }
+
         // avoid l1 cache-set aliasing between soa planes
-        if (stride >= 512) stride = Math.addExact(stride, 16);
+        if (stride >= 512) {
+            stride = Math.addExact(stride, 16);
+        }
+
         var entities = new Entity[stride];
         for (int slot = 0; slot < entries.length; slot++) {
             if (!(entries[slot] instanceof Entity entity)) {
@@ -248,31 +267,29 @@ public final class RealtimeSection {
         if (quantized) {
             bytesPerEntity += BOUNDS_FIELDS.length * Integer.BYTES;
         }
+
         ByteBuffer boxes = ByteBuffer.allocateDirect(Math.multiplyExact(stride, bytesPerEntity))
                 .order(ByteOrder.nativeOrder());
-        if (BatchDiagnostics.ENABLED) {
-            BatchDiagnostics.allocatedBytes += boxes.capacity();
-        }
+
         view = new View(entities, boxes, entries.length, quantized);
-        if (view.address == 0) {
-            throw new IllegalStateException("Direct box buffer has no address");
-        }
+
         dirty = false;
         stateQueued = new boolean[entities.length];
         stateChanges.clear();
+
         for (int slot = 0; slot < entries.length; slot++) {
             IndexedEntity indexed = (IndexedEntity) entities[slot];
             int oldSlot = indexed.ar$sectionSlot();
 
-            boolean cached =
-                    previous != null
-                 && indexed.ar$section() == this
-                 && oldSlot >= 0
-                 && oldSlot < previous.count
-                 && previous.entities[oldSlot] == entities[slot];
+            boolean cached = previous != null
+                    && indexed.ar$section() == this
+                    && oldSlot >= 0
+                    && oldSlot < previous.count
+                    && previous.entities[oldSlot] == entities[slot];
 
             indexed.ar$bindSection(this, slot);
             writeBox(slot, entities[slot].getBoundingBox());
+
             if (cached && !previousQueued[oldSlot]) {
                 double x = previous.boxes.getDouble(EntityField.POS_X.byteOffset(previous.stride, oldSlot));
                 double z = previous.boxes.getDouble(EntityField.POS_Z.byteOffset(previous.stride, oldSlot));
@@ -282,13 +299,11 @@ public final class RealtimeSection {
                 stateDirty(slot);
             }
         }
+
         return view;
     }
 
     public void update(int slot, AABB box) {
-        if (view == null) {
-            return;
-        }
         writeBox(slot, box);
         stateDirty(slot);
     }

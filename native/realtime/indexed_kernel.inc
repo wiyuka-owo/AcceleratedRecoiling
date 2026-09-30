@@ -1,9 +1,7 @@
 template<bool RetainCollisions>
 static bool indexedSection(const Section& section, int sectionIndex, int entryCount,
-        std::int64_t* output, const Query& query, int& collisionCount, int& pushCount) {
-    std::int32_t quantizedBounds[SpatialIndex::BOUNDS_FIELD_COUNT];
-    quantizeBox(query.bounds, quantizedBounds);
-
+        std::int64_t* output, const Query& query, const std::int32_t* quantizedBounds,
+        int& collisionCount, int& pushCount) {
     const auto* entityData = reinterpret_cast<const double*>(section.address);
     SpatialQuery spatial(*section.spatial, quantizedBounds);
     const auto* eligibleEntities = section.spatial->entityBitmap(SpatialIndex::ELIGIBLE);
@@ -42,15 +40,15 @@ static bool indexedSection(const Section& section, int sectionIndex, int entryCo
 
         if constexpr (RetainCollisions) {
             std::uint64_t remainingCollisions = collisionMask;
-            int outputIndex = collisionCount;
             while (remainingCollisions) {
                 const int slot = wordIndex * 64 + std::countr_zero(remainingCollisions);
-                output[outputIndex++] = (std::int64_t(sectionIndex) << 32) | std::uint32_t(slot);
+                output[collisionCount++] = (std::int64_t(sectionIndex) << 32) | std::uint32_t(slot);
                 remainingCollisions &= remainingCollisions - 1;
             }
+        } else {
+            collisionCount += std::popcount(collisionMask);
         }
 
-        collisionCount += std::popcount(collisionMask);
         std::uint64_t pushMask = collisionMask & ~(section.coincident ? section.coincident[wordIndex] : 0);
 
         while (pushMask) {
