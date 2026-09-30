@@ -30,6 +30,21 @@ public abstract class PushableMemoryMixin implements PushableMemoryEntity {
         ar$pushableValid = false;
     }
 
+    @Override
+    public boolean ar$isPushableInTickingSection() {
+        var entity = (LivingEntity) (Object) this;
+        if (!entity.isAlive() || entity.isSpectator()) {
+            return false;
+        }
+
+        long epoch = BatchedRules.epoch();
+        if (ar$hasClimbableCache(epoch)) {
+            return !ar$climbableValue;
+        }
+
+        return !ar$rememberClimbable(entity, entity.onClimbable(), epoch);
+    }
+
     @WrapOperation(method = "isPushable", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/world/entity/LivingEntity;onClimbable()Z"))
     private boolean ar$memoizedClimbable(LivingEntity entity, Operation<Boolean> original) {
@@ -38,20 +53,32 @@ public abstract class PushableMemoryMixin implements PushableMemoryEntity {
         }
 
         long epoch = BatchedRules.epoch();
-        if (ar$pushableValid && ar$pushableEpoch == epoch) {
-            if (BatchDiagnostics.ENABLED) PushableCache.holds++;
+        if (ar$hasClimbableCache(epoch)) {
             return ar$climbableValue;
         }
 
+        return ar$rememberClimbable(entity, original.call(entity), epoch);
+    }
+
+    @Unique
+    private boolean ar$hasClimbableCache(long epoch) {
+        boolean valid = ar$pushableValid && ar$pushableEpoch == epoch;
         if (BatchDiagnostics.ENABLED) {
-            if (ar$pushableValid) {
+            if (valid) {
+                PushableCache.holds++;
+            } else if (ar$pushableValid) {
                 PushableCache.epochMisses++;
             } else {
                 PushableCache.misses++;
             }
         }
 
-        ar$climbableValue = original.call(entity);
+        return valid;
+    }
+
+    @Unique
+    private boolean ar$rememberClimbable(LivingEntity entity, boolean climbable, long epoch) {
+        ar$climbableValue = climbable;
         var state = ((IndexedEntity) entity).ar$cachedBlockState();
         ar$pushableValid = state != null && !(state.getBlock() instanceof TrapDoorBlock);
         ar$pushableEpoch = epoch;

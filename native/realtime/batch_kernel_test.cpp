@@ -38,43 +38,61 @@ struct Input {
     }
 };
 
+#include "spatial_index_test.inc"
+
 static constexpr std::int64_t sentinel = 0x1937562840293746;
 static std::uint64_t checks;
 static std::vector<ar::Kernel> kernels;
 
 static void check(const std::vector<Input>& inputs, const ar::Query& query, int caseNumber) {
-    std::vector<ar::Section> plan;
+    std::vector<ar::Section> sections;
     int count = 0;
     for (const auto& input : inputs) {
-        plan.push_back(input.section());
+        sections.push_back(input.section());
         count += input.count;
     }
-    std::vector<std::int64_t> reference(2 * count + 4, sentinel);
-    std::vector<std::int64_t> observed(reference.size());
-    const int sectionCount = static_cast<int>(plan.size());
-    const auto expected = ar::batch(ar::Kernel::Scalar, plan.data(), sectionCount, count, reference.data() + 2, query);
-    for (bool retainCollisions : {true, false}) {
-        auto requested = query;
-        requested.retainCollisions = retainCollisions;
-        auto expectedOutput = reference;
-        if (!retainCollisions) {
-            std::fill(expectedOutput.begin() + 2, expectedOutput.begin() + count + 2, sentinel);
-        }
+    const int sectionCount = static_cast<int>(sections.size());
+    std::vector<TestSpatialIndex> indexes;
+    for (const auto& input : inputs) {
+        indexes.emplace_back(input, query);
+    }
 
-        for (auto kernel : kernels) {
-            std::fill(observed.begin(), observed.end(), sentinel);
-            const auto result = ar::batch(kernel, plan.data(), sectionCount, count, observed.data() + 2, requested);
-            const bool guardsIntact = observed[0] == sentinel && observed[1] == sentinel
-                    && observed[2 * count + 2] == sentinel && observed[2 * count + 3] == sentinel;
-            const bool unusedHalfIntact = retainCollisions || std::all_of(
-                    observed.begin() + 2, observed.begin() + count + 2,
-                    [](auto value) { return value == sentinel; });
-            const bool outputsMatch = result < 0 || expectedOutput == observed;
-            if (result != expected || !outputsMatch || !guardsIntact || !unusedHalfIntact) {
-                throw std::runtime_error("Mismatch case=" + std::to_string(caseNumber)
-                        + " kernel=" + ar::kernelName(kernel) + " retain=" + std::to_string(retainCollisions));
+    auto indexedSections = sections;
+    for (int section = 0; section < sectionCount; ++section) {
+        indexes[section].attach(indexedSections[section]);
+    }
+
+    for (bool computeImpulses : {false, true}) {
+        for (bool retainCollisions : {true, false}) {
+            auto requested = query;
+            requested.retainCollisions = retainCollisions;
+            requested.computeImpulses = computeImpulses;
+            const int outputWords = count * (computeImpulses ? ar::OUTPUT_FIELDS : ar::IMPULSE_X);
+            std::vector<std::int64_t> reference(outputWords + 4, sentinel);
+            std::vector<std::int64_t> observed(reference.size());
+            const auto expected = ar::batch(ar::Kernel::Scalar, sections.data(), sectionCount,
+                    count, reference.data() + 2, requested);
+
+            for (auto kernel : kernels) {
+                for (bool indexed : {false, true}) {
+                    std::fill(observed.begin(), observed.end(), sentinel);
+                    const auto& descriptors = indexed ? indexedSections : sections;
+                    const auto result = ar::batch(kernel, descriptors.data(), sectionCount,
+                            count, observed.data() + 2, requested);
+                    const bool guardsIntact = observed[0] == sentinel && observed[1] == sentinel
+                            && observed[outputWords + 2] == sentinel && observed[outputWords + 3] == sentinel;
+                    const bool unusedHalfIntact = retainCollisions || std::all_of(
+                            observed.begin() + 2, observed.begin() + count + 2,
+                            [](auto value) { return value == sentinel; });
+                    const bool outputsMatch = result < 0 || reference == observed;
+                    if (result != expected || !outputsMatch || !guardsIntact || !unusedHalfIntact) {
+                        throw std::runtime_error("Mismatch case=" + std::to_string(caseNumber)
+                                + " kernel=" + ar::kernelName(kernel) + " retain=" + std::to_string(retainCollisions)
+                                + " impulses=" + std::to_string(computeImpulses) + " indexed=" + std::to_string(indexed));
+                    }
+                    ++checks;
+                }
             }
-            ++checks;
         }
     }
 }

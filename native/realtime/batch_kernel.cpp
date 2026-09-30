@@ -87,7 +87,12 @@ static bool scalarCandidate(const double* data, int stride, int section, int slo
 
     constexpr double pushThreshold = static_cast<double>(0.01f);
     if (std::fabs(q.x - x) >= pushThreshold || std::fabs(q.z - z) >= pushThreshold) {
-        output[entries + nonzero++] = hit;
+        output[PUSH_TARGETS * entries + nonzero] = hit;
+        if (q.computeImpulses) {
+            output[IMPULSE_X * entries + nonzero] = std::bit_cast<std::int64_t>(q.x - x);
+            output[IMPULSE_Z * entries + nonzero] = std::bit_cast<std::int64_t>(q.z - z);
+        }
+        ++nonzero;
     }
 
     return true;
@@ -110,6 +115,25 @@ static std::int64_t scalarBatch(const Section* plan, int sectionCount, int entri
 
     return (std::int64_t(selected) << 32) | std::uint32_t(nonzero);
 }
+
+static void scalarImpulses(int count, std::int64_t* outputX, std::int64_t* outputZ) {
+    for (int index = 0; index < count; ++index) {
+        double impulseX = std::bit_cast<double>(outputX[index]);
+        double impulseZ = std::bit_cast<double>(outputZ[index]);
+        const double distance = std::sqrt(std::fmax(std::fabs(impulseX), std::fabs(impulseZ)));
+        impulseX /= distance;
+        impulseZ /= distance;
+        const double scale = std::fmin(1.0 / distance, 1.0);
+        impulseX *= scale;
+        impulseZ *= scale;
+        impulseX *= static_cast<double>(0.05f);
+        impulseZ *= static_cast<double>(0.05f);
+        outputX[index] = std::bit_cast<std::int64_t>(impulseX);
+        outputZ[index] = std::bit_cast<std::int64_t>(impulseZ);
+    }
+}
+
+#include "indexed_kernel.inc"
 
 struct CompressTable {
     std::array<std::array<std::uint8_t, 8>, 256> lanes{};
@@ -159,6 +183,16 @@ static inline void storeMask(std::int64_t* output, std::int64_t first, unsigned 
 
 #define AR_ABS(a) _mm_andnot_pd(_mm_set1_pd(-0.0), a)
 #define AR_SUB _mm_sub_pd
+#define AR_STORE_VALUES sse2StoreValues
+#define AR_CALCULATE_IMPULSES sse2Impulses
+#define AR_LOAD_BITS(p) _mm_castsi128_pd(_mm_loadu_si128(reinterpret_cast<const __m128i*>(p)))
+#define AR_DIV _mm_div_pd
+#define AR_MUL _mm_mul_pd
+#define AR_SQRT _mm_sqrt_pd
+#define AR_MAX _mm_max_pd
+#define AR_MIN _mm_min_pd
+#define AR_STORED _mm_storeu_pd
+#define AR_STORE_BITS(p,v) _mm_storeu_si128(reinterpret_cast<__m128i*>(p), _mm_castpd_si128(v))
 #define AR_STORE storeMask
 
 #include "batch_simd.inc"
@@ -194,6 +228,16 @@ static inline void storeMask256(std::int64_t* output, std::int64_t first, unsign
 
 #define AR_ABS(a) _mm256_andnot_pd(_mm256_set1_pd(-0.0), a)
 #define AR_SUB _mm256_sub_pd
+#define AR_STORE_VALUES avx2StoreValues
+#define AR_CALCULATE_IMPULSES avx2Impulses
+#define AR_LOAD_BITS(p) _mm256_castsi256_pd(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(p)))
+#define AR_DIV _mm256_div_pd
+#define AR_MUL _mm256_mul_pd
+#define AR_SQRT _mm256_sqrt_pd
+#define AR_MAX _mm256_max_pd
+#define AR_MIN _mm256_min_pd
+#define AR_STORED _mm256_storeu_pd
+#define AR_STORE_BITS(p,v) _mm256_storeu_si256(reinterpret_cast<__m256i*>(p), _mm256_castpd_si256(v))
 #define AR_STORE storeMask256
 
 #include "batch_simd.inc"
@@ -225,6 +269,16 @@ static inline void storeMask512(std::int64_t* output, std::int64_t first, unsign
 
 #define AR_ABS(a) _mm512_andnot_pd(_mm512_set1_pd(-0.0), a)
 #define AR_SUB _mm512_sub_pd
+#define AR_STORE_VALUES avx512StoreValues
+#define AR_CALCULATE_IMPULSES avx512Impulses
+#define AR_LOAD_BITS(p) _mm512_castsi512_pd(_mm512_loadu_si512(reinterpret_cast<const __m512i*>(p)))
+#define AR_DIV _mm512_div_pd
+#define AR_MUL _mm512_mul_pd
+#define AR_SQRT _mm512_sqrt_pd
+#define AR_MAX _mm512_max_pd
+#define AR_MIN _mm512_min_pd
+#define AR_STORED _mm512_storeu_pd
+#define AR_STORE_BITS(p,v) _mm512_storeu_si512(p, _mm512_castpd_si512(v))
 #define AR_STORE storeMask512
 
 #include "batch_simd.inc"
@@ -370,11 +424,37 @@ static std::int64_t batchWithOutput(Kernel kernel, const Section* plan, int sect
     return scalarBatch<RetainCollisions>(plan, sectionCount, entries, output, q);
 }
 
+static void calculateImpulses(Kernel kernel, int count, std::int64_t* outputX, std::int64_t* outputZ) {
+#ifdef AR_X86_SIMD
+    switch (kernel) {
+        case Kernel::SSE2:
+        case Kernel::QuantizedSSE2:
+            sse2Impulses(count, outputX, outputZ);
+            return;
+        case Kernel::AVX2:
+        case Kernel::QuantizedAVX2:
+            avx2Impulses(count, outputX, outputZ);
+            return;
+        case Kernel::AVX512:
+        case Kernel::QuantizedAVX512:
+            avx512Impulses(count, outputX, outputZ);
+            return;
+        default:
+            break;
+    }
+#endif
+    scalarImpulses(count, outputX, outputZ);
+}
+
 std::int64_t batch(Kernel kernel, const Section* sections, int sectionCount, int entries,
         std::int64_t* output, const Query& query) {
-    return query.retainCollisions
+    const auto result = query.retainCollisions
             ? batchWithOutput<true>(kernel, sections, sectionCount, entries, output, query)
             : batchWithOutput<false>(kernel, sections, sectionCount, entries, output, query);
+    if (result >= 0 && query.computeImpulses) {
+        calculateImpulses(kernel, static_cast<int>(result), output + IMPULSE_X * entries, output + IMPULSE_Z * entries);
+    }
+    return result;
 }
 
 }
