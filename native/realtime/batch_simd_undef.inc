@@ -16,3 +16,13 @@
 #undef AR_ABS
 #undef AR_SUB
 #undef AR_STORE
+#undef AR_STORE_VALUES
+#undef AR_CALCULATE_IMPULSES
+#undef AR_LOAD_BITS
+#undef AR_DIV
+#undef AR_MUL
+#undef AR_SQRT
+#undef AR_MAX
+#undef AR_MIN
+#undef AR_STORED
+#undef AR_STORE_BITS
