@@ -2,10 +2,9 @@ package com.wiyuka.acceleratedrecoiling;
 
 import com.mojang.logging.LogUtils;
 import com.wiyuka.acceleratedrecoiling.config.FoldConfig;
-import com.wiyuka.acceleratedrecoiling.listeners.ServerStop;
-
+import com.wiyuka.acceleratedrecoiling.natives.realtime.BatchedCollisions;
 import net.fabricmc.api.ModInitializer;
-
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import org.slf4j.Logger;
 
 public class AcceleratedRecoiling implements ModInitializer {
@@ -15,6 +14,6 @@ public class AcceleratedRecoiling implements ModInitializer {
     @Override
     public void onInitialize() {
         FoldConfig.loadConfig();
-        ServerStop.register();
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> BatchedCollisions.clear());
     }
 }

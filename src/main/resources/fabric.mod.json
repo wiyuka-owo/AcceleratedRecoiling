@@ -15,9 +15,6 @@
   "entrypoints": {
     "main": [
       "com.wiyuka.acceleratedrecoiling.AcceleratedRecoiling"
-    ],
-    "client": [
-      "com.wiyuka.acceleratedrecoiling.client.AcceleratedRecoilingClient"
     ]
   },
   "mixins": [

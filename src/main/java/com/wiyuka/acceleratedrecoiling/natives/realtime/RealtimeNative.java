@@ -77,11 +77,8 @@ public final class RealtimeNative {
         String arch = switch (System.getProperty("os.arch").toLowerCase(Locale.ROOT)) {
             case "amd64", "x86_64" -> "x64";
             case "aarch64", "arm64" -> "arm64";
-            default -> null;
+            default -> throw new UnsupportedOperationException("Unsupported native platform");
         };
-        if (arch == null) {
-            throw new UnsupportedOperationException("Unsupported native platform");
-        }
         return "/natives/" + os + "-" + arch + "/";
     }
 
@@ -89,19 +86,19 @@ public final class RealtimeNative {
     private static native int selectKernel(int requested);
     private static native int quantizationMinEntities();
 
-    static boolean quantizeSection(int size) {
+    public static boolean quantizeSection(int size) {
         return kernel.quantized && size >= quantizationThreshold;
     }
 
-    static boolean indexSection(int size) {
-        return kernel != Kernel.SCALAR && SpatialIndex.enabled(size);
+    public static boolean usesSimd() {
+        return kernel != Kernel.SCALAR;
     }
 
     public static String kernelName() {
         return kernel.configName;
     }
 
-    static native long address(ByteBuffer buffer);
+    public static native long address(ByteBuffer buffer);
 
     static native long queryBatch(ByteBuffer sectionDescriptors, int sectionCount, ByteBuffer output,
             int sourceSection, int sourceSlot, double sourceX, double sourceZ,
