@@ -126,8 +126,10 @@ final class CollisionMethods {
         entity.isVehicle();
         entity.getTeam();
         entity.isSpectator();
+        entity.isAlwaysTicking();
         entity.getInBlockState();
         entity.push(0, 0, 0);
+        entity.setDeltaMovement(entity.getDeltaMovement());
         entity.canCollideWith(entity);
         entity.isPassengerOfSameVehicle(entity);
     }
