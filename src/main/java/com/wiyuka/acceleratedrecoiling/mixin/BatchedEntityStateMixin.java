@@ -1,6 +1,6 @@
 package com.wiyuka.acceleratedrecoiling.mixin;
 
-import com.wiyuka.acceleratedrecoiling.natives.realtime.IndexedEntity;
+import com.wiyuka.acceleratedrecoiling.natives.realtime.index.IndexedEntity;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.state.BlockState;
 import org.objectweb.asm.Opcodes;
