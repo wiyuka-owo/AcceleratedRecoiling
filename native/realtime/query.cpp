@@ -12,7 +12,7 @@ extern "C" {
 
 JNIEXPORT jint JNICALL Java_com_wiyuka_acceleratedrecoiling_natives_realtime_RealtimeNative_version(
         JNIEnv*, jclass) {
-    return 8;
+    return 10;
 }
 
 JNIEXPORT jint JNICALL Java_com_wiyuka_acceleratedrecoiling_natives_realtime_RealtimeNative_quantizationMinEntities(
@@ -45,7 +45,7 @@ JNIEXPORT jlong JNICALL Java_com_wiyuka_acceleratedrecoiling_natives_realtime_Re
         JNIEnv* env, jclass, jobject sectionBuffer, jint sectionCount, jobject outputBuffer,
         jint sourceSection, jint sourceSlot, jdouble sourceX, jdouble sourceZ,
         jdouble minX, jdouble minY, jdouble minZ, jdouble maxX, jdouble maxY, jdouble maxZ,
-        jboolean retainCollisions) {
+        jboolean retainCollisions, jboolean computeImpulses) {
     const auto* sections = static_cast<const Section*>(env->GetDirectBufferAddress(sectionBuffer));
     auto* output = static_cast<std::int64_t*>(env->GetDirectBufferAddress(outputBuffer));
 
@@ -76,7 +76,8 @@ JNIEXPORT jlong JNICALL Java_com_wiyuka_acceleratedrecoiling_natives_realtime_Re
         return -2;
     }
 
-    const std::int64_t requiredOutputBytes = entryCount * 2 * sizeof(std::int64_t);
+    const int outputFields = computeImpulses ? ar::OUTPUT_FIELDS : ar::PUSH_TARGETS + 1;
+    const std::int64_t requiredOutputBytes = entryCount * outputFields * sizeof(std::int64_t);
     if (requiredOutputBytes > env->GetDirectBufferCapacity(outputBuffer)) {
         return -2;
     }
@@ -85,7 +86,8 @@ JNIEXPORT jlong JNICALL Java_com_wiyuka_acceleratedrecoiling_natives_realtime_Re
         {minX, minY, minZ, maxX, maxY, maxZ},
         sourceX, sourceZ,
         sourceSection, sourceSlot,
-        retainCollisions != JNI_FALSE
+        retainCollisions != JNI_FALSE,
+        computeImpulses != JNI_FALSE
     };
 
     return ar::batch(batchKernel, sections, sectionCount, static_cast<int>(entryCount), output, query);

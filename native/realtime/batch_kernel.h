@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include "spatial_index.h"
 
 namespace ar {
 
@@ -21,8 +22,10 @@ struct Section {
     std::int64_t address;
     std::int32_t count;
     std::int32_t stride;
+    const SpatialIndex* spatial = nullptr;
+    const std::uint64_t* coincident = nullptr;
 };
-static_assert(sizeof(Section) == 16);
+static_assert(sizeof(Section) == 32);
 
 struct Query {
     double bounds[6];
@@ -31,6 +34,15 @@ struct Query {
     int sourceSection;
     int sourceSlot;
     bool retainCollisions = true;
+    bool computeImpulses = false;
+};
+
+enum OutputField : int {
+    COLLISIONS,
+    PUSH_TARGETS,
+    IMPULSE_X,
+    IMPULSE_Z,
+    OUTPUT_FIELDS
 };
 
 enum class Kernel : int {
