@@ -1,6 +1,6 @@
 package com.wiyuka.acceleratedrecoiling.mixin;
 
-import com.wiyuka.acceleratedrecoiling.natives.realtime.BatchedRules;
+import com.wiyuka.acceleratedrecoiling.natives.realtime.compat.BatchedRules;
 import net.minecraft.world.scores.Scoreboard;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;

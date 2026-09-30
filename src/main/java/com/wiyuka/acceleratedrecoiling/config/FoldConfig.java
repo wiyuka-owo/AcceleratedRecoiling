@@ -16,19 +16,20 @@ public final class FoldConfig {
     }
 
     public static void loadConfig() {
-        boolean enabled = true;
-        if (Files.exists(CONFIG_FILE)) {
-            try {
-                JsonObject json = JsonParser.parseString(Files.readString(CONFIG_FILE)).getAsJsonObject();
-                if (json.has("enableEntityCollision")) {
-                    enabled = json.get("enableEntityCollision").getAsBoolean();
-                }
-            } catch (IOException | RuntimeException e) {
-                AcceleratedRecoiling.LOGGER.warn("Cannot read collision config; using defaults", e);
-            }
+        enableEntityCollision = true;
+        if (!Files.exists(CONFIG_FILE)) {
+            saveConfig();
+            return;
         }
-        enableEntityCollision = enabled;
-        saveConfig();
+
+        try {
+            JsonObject json = JsonParser.parseString(Files.readString(CONFIG_FILE)).getAsJsonObject();
+            if (json.has("enableEntityCollision")) {
+                enableEntityCollision = json.get("enableEntityCollision").getAsBoolean();
+            }
+        } catch (IOException | RuntimeException e) {
+            AcceleratedRecoiling.LOGGER.warn("Cannot read collision config; using defaults", e);
+        }
     }
 
     public static void saveConfig() {

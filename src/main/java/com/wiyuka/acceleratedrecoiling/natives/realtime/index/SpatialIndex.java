@@ -1,5 +1,6 @@
-package com.wiyuka.acceleratedrecoiling.natives.realtime;
+package com.wiyuka.acceleratedrecoiling.natives.realtime.index;
 
+import com.wiyuka.acceleratedrecoiling.natives.realtime.RealtimeNative;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
@@ -25,7 +26,7 @@ final class SpatialIndex {
     private static final int CELL_SHIFT = 5;
     private static final int CELL_COUNT = 32;
     private static final int SCALE = 64;
-    private static final byte UNSET_CELL = -1;
+    private static final byte UNSET_CELL = CELL_COUNT;
 
     private static final int WORD_COUNT_OFFSET = AXIS_COUNT * Long.BYTES;
     private static final int CELL_COUNT_OFFSET = WORD_COUNT_OFFSET + Integer.BYTES;
@@ -53,7 +54,7 @@ final class SpatialIndex {
     private final PositionGroups groups;
 
     static boolean enabled(int entities) {
-        return ENABLED && entities >= MIN_ENTITIES;
+        return ENABLED && entities >= MIN_ENTITIES && RealtimeNative.usesSimd();
     }
 
     SpatialIndex(int capacity, BlockPos origin) {
@@ -79,10 +80,6 @@ final class SpatialIndex {
         boundCells = new byte[Math.multiplyExact(capacity, BOUNDS_FIELD_COUNT)];
         Arrays.fill(boundCells, UNSET_CELL);
         groups = new PositionGroups(capacity, bufferBytes);
-
-        if (BatchDiagnostics.ENABLED) {
-            BatchDiagnostics.allocatedBytes += bufferBytes;
-        }
     }
 
     long address() {
@@ -136,26 +133,11 @@ final class SpatialIndex {
 
         boundCells[cellOffset] = (byte) newCell;
 
-        int firstBoundary;
-        int endBoundary;
-        boolean includeEntity;
-        if (previousCell == UNSET_CELL) {
-            firstBoundary = newCell;
-            endBoundary = CELL_COUNT;
-            includeEntity = true;
-        } else if (newCell < previousCell) {
-            firstBoundary = newCell;
-            endBoundary = previousCell;
-            includeEntity = true;
-        } else {
-            firstBoundary = previousCell;
-            endBoundary = newCell;
-            includeEntity = false;
-        }
-
+        int firstBoundary = Math.min(previousCell, newCell);
+        int endBoundary = Math.max(previousCell, newCell);
         int firstFieldRow = fieldIndex * CELL_COUNT;
         for (int boundary = firstBoundary; boundary < endBoundary; boundary++) {
-            setRowBit(firstFieldRow + boundary, slot, includeEntity);
+            setRowBit(firstFieldRow + boundary, slot, newCell < previousCell);
         }
     }
 
@@ -171,5 +153,4 @@ final class SpatialIndex {
             bitmaps.putLong(byteOffset, updatedWord);
         }
     }
-
 }

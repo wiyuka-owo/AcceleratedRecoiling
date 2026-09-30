@@ -1,4 +1,4 @@
-package com.wiyuka.acceleratedrecoiling.natives.realtime;
+package com.wiyuka.acceleratedrecoiling.natives.realtime.index;
 
 public interface IndexedSection {
 

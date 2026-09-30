@@ -1,8 +1,8 @@
 package com.wiyuka.acceleratedrecoiling.mixin;
 
-import com.wiyuka.acceleratedrecoiling.natives.realtime.IndexedEntity;
+import com.wiyuka.acceleratedrecoiling.natives.realtime.index.IndexedEntity;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.PushableMemoryEntity;
-import com.wiyuka.acceleratedrecoiling.natives.realtime.RealtimeSection;
+import com.wiyuka.acceleratedrecoiling.natives.realtime.index.RealtimeSection;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;

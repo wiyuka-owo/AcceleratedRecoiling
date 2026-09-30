@@ -1,6 +1,5 @@
 #include <jni.h>
 #include <cstdint>
-#include <cmath>
 
 #include "batch_kernel.h"
 
@@ -56,10 +55,6 @@ JNIEXPORT jlong JNICALL Java_com_wiyuka_acceleratedrecoiling_natives_realtime_Re
     const auto requiredSectionBytes = std::int64_t(sectionCount) * std::int64_t(sizeof(Section));
     if (requiredSectionBytes > env->GetDirectBufferCapacity(sectionBuffer)) {
         return -2;
-    }
-
-    if (!std::isfinite(sourceX) || !std::isfinite(sourceZ)) {
-        return -1;
     }
 
     std::int64_t entryCount = 0;
