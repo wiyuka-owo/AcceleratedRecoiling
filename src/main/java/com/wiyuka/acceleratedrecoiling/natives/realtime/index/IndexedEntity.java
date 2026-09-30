@@ -1,4 +1,4 @@
-package com.wiyuka.acceleratedrecoiling.natives.realtime;
+package com.wiyuka.acceleratedrecoiling.natives.realtime.index;
 
 import net.minecraft.world.level.block.state.BlockState;
 

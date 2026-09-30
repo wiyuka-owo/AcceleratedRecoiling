@@ -1,7 +1,7 @@
 package com.wiyuka.acceleratedrecoiling.mixin;
 
-import com.wiyuka.acceleratedrecoiling.natives.realtime.IndexedSection;
-import com.wiyuka.acceleratedrecoiling.natives.realtime.RealtimeSection;
+import com.wiyuka.acceleratedrecoiling.natives.realtime.index.IndexedSection;
+import com.wiyuka.acceleratedrecoiling.natives.realtime.index.RealtimeSection;
 import net.minecraft.world.level.entity.EntityAccess;
 import net.minecraft.world.level.entity.EntitySection;
 import org.spongepowered.asm.mixin.Mixin;

@@ -13,7 +13,7 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-import com.wiyuka.acceleratedrecoiling.natives.realtime.BatchedRules;
+import com.wiyuka.acceleratedrecoiling.natives.realtime.compat.BatchedRules;
 
 @Mixin(Holder.Reference.class)
 public abstract class ClimbableTagMixin<T> {
