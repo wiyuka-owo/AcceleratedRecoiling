@@ -1,5 +1,6 @@
-package com.wiyuka.acceleratedrecoiling.natives.realtime;
+package com.wiyuka.acceleratedrecoiling.natives.realtime.index;
 
+import com.wiyuka.acceleratedrecoiling.natives.realtime.RealtimeNative;
 import it.unimi.dsi.fastutil.HashCommon;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import java.nio.ByteBuffer;
@@ -153,10 +154,6 @@ final class PositionGroups {
             if (entityGroups[slot] == group) {
                 setGroupMember(group, slot, true);
             }
-        }
-
-        if (BatchDiagnostics.ENABLED) {
-            BatchDiagnostics.allocatedBytes += bytesPerBitmap;
         }
     }
 
