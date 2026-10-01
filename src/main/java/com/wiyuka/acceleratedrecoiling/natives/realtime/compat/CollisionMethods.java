@@ -163,7 +163,7 @@ final class CollisionMethods {
     }
 
     private static void soft(Entity entity) {
-        entity.canBeCollidedWith(entity);
+        entity.canBeCollidedWith();
         entity.isSpectator();
     }
 }

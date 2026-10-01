@@ -11,7 +11,7 @@
 
 ## 使用
 
-模组工程的 Gradle 会下载指定 Release 中的 `cpptoolchain.zip`，解压后编译包内源码。
+模组工程的 Gradle 会下载指定 Release 中的 `cpptoolchain.zip`，使用包内编译环境编译项目的 `native/realtime` 源码。包内也附带发布时的 C++ 源码。
 
 Windows 构建默认生成 Windows x64、Linux x64、macOS x64 和 macOS ARM64 的动态库。Linux、macOS 本机构建使用已安装的 CMake 和 C++20 编译器，仅生成本机平台的库。
 

@@ -14,10 +14,9 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.AbortableIterationConsumer.Continuation;
-import net.minecraft.util.profiling.Profiler;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.level.gamerules.GameRules;
+import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.entity.EntitySectionStorage;
 import net.minecraft.world.level.entity.LevelEntityGetterAdapter;
 import net.minecraft.world.phys.AABB;
@@ -88,7 +87,7 @@ public final class BatchedCollisions {
         }
         ServerLevel level = (ServerLevel) source.level();
 
-        if (!level.dragonParts().isEmpty()) return false;
+        if (!((BatchedLevelAccess) level).ar$dragonParts().isEmpty()) return false;
 
         var getter = ((BatchedLevelAccess) level).ar$entities();
 
@@ -104,7 +103,7 @@ public final class BatchedCollisions {
             return Continuation.CONTINUE;
         });
         if (empty[0] && !(area.getSize() < 1.0E-7)) {
-            Profiler.get().incrementCounter("getEntities");
+            level.getProfiler().incrementCounter("getEntities");
         }
         return empty[0];
     }
@@ -116,7 +115,7 @@ public final class BatchedCollisions {
         }
 
         ServerLevel level = (ServerLevel) source.level();
-        if (!level.dragonParts().isEmpty()) {
+        if (!((BatchedLevelAccess) level).ar$dragonParts().isEmpty()) {
             return false;
         }
         var getter = ((BatchedLevelAccess) level).ar$entities();
@@ -204,7 +203,7 @@ public final class BatchedCollisions {
                                         AABB bounds,
                                         Frame frame) {
         IndexedEntity indexedSource = (IndexedEntity) source;
-        int crammingLimit = level.getGameRules().get(GameRules.MAX_ENTITY_CRAMMING);
+        int crammingLimit = level.getGameRules().getInt(GameRules.RULE_MAX_ENTITY_CRAMMING);
         long counts = RealtimeNative.queryBatch(frame.sectionDescriptors, frame.sections.size(), frame.output, frame.sourceSection,
                 indexedSource.ar$sectionSlot(), source.getX(), source.getZ(),
                 bounds.minX, bounds.minY, bounds.minZ, bounds.maxX, bounds.maxY, bounds.maxZ,
@@ -223,14 +222,13 @@ public final class BatchedCollisions {
             throw new IllegalStateException("Invalid native batch counts");
         }
 
-        Profiler.get().incrementCounter("getEntities");
-        dispatchPushes(source, level, frame, collisionCount, pushCount, crammingLimit);
+        level.getProfiler().incrementCounter("getEntities");
+        dispatchPushes(source, frame, collisionCount, pushCount, crammingLimit);
 
         return true;
     }
 
     private static void dispatchPushes(LivingEntity source,
-                                      ServerLevel level,
                                       Frame frame,
                                       int collisionCount,
                                       int pushCount,
@@ -238,7 +236,7 @@ public final class BatchedCollisions {
         boolean crammingAttempted = false;
         if (collisionCount > 0 && crammingLimit > 0 && collisionCount > crammingLimit - 1
                 && source.getRandom().nextInt(4) == 0) {
-            source.hurtServer(level, source.damageSources().cramming(), 6.0F);
+            source.hurt(source.damageSources().cramming(), 6.0F);
             crammingAttempted = true;
         }
 
@@ -273,7 +271,7 @@ public final class BatchedCollisions {
         double velocityZ = velocity.z;
         boolean sourcePushabilityChecked = false;
         boolean sourcePushable = false;
-        boolean sourceNeedsSync = false;
+        boolean sourceHasImpulse = false;
 
         int impulseXOffset = OutputField.IMPULSE_X.byteOffset(frame.entryCount);
         int impulseZOffset = OutputField.IMPULSE_Z.byteOffset(frame.entryCount);
@@ -294,24 +292,19 @@ public final class BatchedCollisions {
                 sourcePushable = !source.isVehicle() && isPushableInBatch(source, frame.sourceSection >= 0);
                 sourcePushabilityChecked = true;
             }
-            if (!sourcePushable || !Double.isFinite(impulseX) || !Double.isFinite(impulseZ)) {
+            if (!sourcePushable) {
                 continue;
             }
 
-            double nextX = velocityX + impulseX;
-            double nextY = velocityY + 0.0;
-            double nextZ = velocityZ + impulseZ;
-            if (Double.isFinite(nextX) && Double.isFinite(nextY) && Double.isFinite(nextZ)) {
-                velocityX = nextX;
-                velocityY = nextY;
-                velocityZ = nextZ;
-            }
-            sourceNeedsSync = true;
+            velocityX += impulseX;
+            velocityY += 0.0;
+            velocityZ += impulseZ;
+            sourceHasImpulse = true;
         }
 
-        if (sourceNeedsSync) {
+        if (sourceHasImpulse) {
             source.setDeltaMovement(new Vec3(velocityX, velocityY, velocityZ));
-            source.needsSync = true;
+            source.hasImpulse = true;
         }
     }
 
