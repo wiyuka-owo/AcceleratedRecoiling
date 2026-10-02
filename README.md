@@ -74,3 +74,4 @@ Gradle 将下载位于 GitHub Release 中的由 `cpp_toolchain_version` 指定�
 *   **[wellcoming](https://github.com/wellcoming)**: Docker Ubuntu镜像解决方案。
 *   **[grayawa](https://github.com/grayawa)**: Linux 上的构建问题修复
 *   **[TomatoPuddin](https://github.com/TomatoPuddin)**: 跨平台构建(Windows/Linux/MacOS/Android) 与 C++ 层的重构
+*   **[baturax](https://github.com/baturax)**: GUI配置的土耳其语翻译
