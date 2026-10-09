@@ -12,9 +12,8 @@ import net.minecraft.world.phys.AABB;
 
 public final class BlockCollisionCache {
     private static final int CACHE_SIZE = 128;
-    private static final boolean SUPPORTED = BatchedRules.simpleBlockCollisions();
     private static final boolean FULL_BLOCK_MOVEMENT = Boolean.parseBoolean(
-            System.getProperty("ar.experimental.fullBlockMovement", "true")) && BatchedRules.fullBlockMovement();
+            System.getProperty("ar.experimental.fullBlockMovement", "true"));
     private static final ThreadLocal<CachedRegion[]> CACHE = ThreadLocal.withInitial(() -> new CachedRegion[CACHE_SIZE]);
 
     private record SectionSnapshot(
@@ -140,7 +139,7 @@ public final class BlockCollisionCache {
 
     private static boolean canCache(Entity source, Level level) {
         return RealtimeNative.isEnabled() && source != null
-                && level.getClass() == ServerLevel.class && SUPPORTED
+                && level.getClass() == ServerLevel.class
                 && BatchedRules.plain(source.getClass()) && level.getServer().isSameThread();
     }
 
