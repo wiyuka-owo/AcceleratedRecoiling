@@ -79,12 +79,34 @@ static std::int64_t AR_BATCH(const Section* sections, int sectionCount, int entr
         const bool useQuantization = Quantized && currentSection.count >= MIN_QUANTIZED_ENTITIES;
         const int sourceSlot = section == query.sourceSection ? query.sourceSlot : -1;
 
+        std::optional<SpatialQuery> spatialQuery;
+        if (currentSection.spatial) {
+            spatialQuery.emplace(*currentSection.spatial, quantizedQueryBounds);
+        }
+        std::uint64_t candidateWord = 0;
+        std::uint64_t confirmedWord = 0;
+
         int blockStart = 0;
         for (; blockStart <= currentSection.count - AR_ILANES; blockStart += AR_ILANES) {
             unsigned candidateMask = integerLaneMask;
             unsigned confirmedMask = 0;
 
-            if (useQuantization) {
+            if (spatialQuery) {
+                const int bitOffset = blockStart % 64;
+                if (bitOffset == 0) {
+                    const int word = blockStart / 64;
+                    spatialQuery->masks(word, candidateWord, confirmedWord);
+                    const auto activeEntities = currentSection.spatial->entityBitmap(SpatialIndex::ELIGIBLE)[word]
+                            | currentSection.spatial->entityBitmap(SpatialIndex::FALLBACK)[word];
+                    candidateWord &= activeEntities;
+                }
+
+                candidateMask = static_cast<unsigned>(candidateWord >> bitOffset) & integerLaneMask;
+                confirmedMask = static_cast<unsigned>(confirmedWord >> bitOffset) & candidateMask;
+                if (candidateMask == 0) {
+                    continue;
+                }
+            } else if (useQuantization) {
                 const auto* blockBounds = quantizedBoxes + blockStart;
                 const auto candidateMinX = AR_LOADI(blockBounds + BOUNDS_MIN_X * stride);
                 const auto candidateMinY = AR_LOADI(blockBounds + BOUNDS_MIN_Y * stride);
