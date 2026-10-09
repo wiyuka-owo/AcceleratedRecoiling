@@ -4,6 +4,7 @@
 #include <bit>
 #include <cfloat>
 #include <cmath>
+#include <optional>
 
 #if (defined(__x86_64__) || defined(_M_X64)) && (defined(__clang__) || defined(__GNUC__))
 #define AR_X86_SIMD 1

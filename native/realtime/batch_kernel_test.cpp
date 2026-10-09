@@ -36,6 +36,19 @@ struct Input {
             std::memcpy(bytes + offset, &quantized[plane], sizeof(std::int32_t));
         }
     }
+
+    void remove(int slot) {
+        for (int field = ar::BOUNDS_MIN_X; field <= ar::BOUNDS_MAX_Z; ++field) {
+            const bool minimum = field < ar::BOUNDS_MAX_X;
+            doubles[field * stride + slot] = minimum
+                    ? std::numeric_limits<double>::infinity() : -std::numeric_limits<double>::infinity();
+
+            if (count >= ar::MIN_QUANTIZED_ENTITIES) {
+                auto* boxes = reinterpret_cast<std::int32_t*>(doubles.data() + ar::QUANTIZED_BOXES * stride);
+                boxes[field * stride + slot] = minimum ? INT32_MAX : INT32_MIN;
+            }
+        }
+    }
 };
 
 #include "spatial_index_test.inc"
@@ -62,6 +75,13 @@ static void check(const std::vector<Input>& inputs, const ar::Query& query, int 
         indexes[section].attach(indexedSections[section]);
     }
 
+    auto spatialSections = indexedSections;
+    for (auto& section : spatialSections) {
+        section.coincident = nullptr;
+    }
+
+    const std::array descriptorModes{&sections, &indexedSections, &spatialSections};
+
     for (bool computeImpulses : {false, true}) {
         for (bool retainCollisions : {true, false}) {
             auto requested = query;
@@ -74,9 +94,9 @@ static void check(const std::vector<Input>& inputs, const ar::Query& query, int 
                     count, reference.data() + 2, requested);
 
             for (auto kernel : kernels) {
-                for (bool indexed : {false, true}) {
+                for (int mode = 0; mode < descriptorModes.size(); ++mode) {
                     std::fill(observed.begin(), observed.end(), sentinel);
-                    const auto& descriptors = indexed ? indexedSections : sections;
+                    const auto& descriptors = *descriptorModes[mode];
                     const auto result = ar::batch(kernel, descriptors.data(), sectionCount,
                             count, observed.data() + 2, requested);
                     const bool guardsIntact = observed[0] == sentinel && observed[1] == sentinel
@@ -88,7 +108,7 @@ static void check(const std::vector<Input>& inputs, const ar::Query& query, int 
                     if (result != expected || !outputsMatch || !guardsIntact || !unusedHalfIntact) {
                         throw std::runtime_error("Mismatch case=" + std::to_string(caseNumber)
                                 + " kernel=" + ar::kernelName(kernel) + " retain=" + std::to_string(retainCollisions)
-                                + " impulses=" + std::to_string(computeImpulses) + " indexed=" + std::to_string(indexed));
+                                + " impulses=" + std::to_string(computeImpulses) + " descriptorMode=" + std::to_string(mode));
                     }
                     ++checks;
                 }
@@ -246,6 +266,43 @@ static void differential() {
     std::cout << "PASS " << checks << " kernel/oracle comparisons (ordered outputs, counts, fallback and guards)\n";
 }
 
+static void removedSlots() {
+    Input input(1033);
+    for (int slot = 0; slot < input.count; ++slot) {
+        input.put(slot, {.1, .1, .1, .9, .9, .9}, .5 + (slot % 8) * .01, .5);
+    }
+    ar::Query query{{-1, -1, -1, 2, 2, 2}, .5, .5, 0, 0};
+    TestSpatialIndex index(input, query);
+    for (int slot = 1; slot < input.count; slot += 7) {
+        input.remove(slot);
+        index.remove(slot);
+    }
+
+    const auto plain = input.section();
+    auto indexed = plain;
+    index.attach(indexed);
+    indexed.coincident = nullptr;
+    for (bool computeImpulses : {false, true}) {
+        for (bool retainCollisions : {false, true}) {
+            query.computeImpulses = computeImpulses;
+            query.retainCollisions = retainCollisions;
+
+            std::vector<std::int64_t> expected(input.count * ar::OUTPUT_FIELDS, sentinel);
+            const auto expectedCount = ar::batch(ar::Kernel::Scalar, &plain, 1, input.count, expected.data(), query);
+
+            for (auto kernel : kernels) {
+                std::vector<std::int64_t> observed(expected.size(), sentinel);
+                const auto count = ar::batch(kernel, &indexed, 1, input.count, observed.data(), query);
+                if (count != expectedCount || observed != expected) {
+                    throw std::runtime_error("Removed slot returned by " + std::string(ar::kernelName(kernel)));
+                }
+            }
+        }
+    }
+
+    std::cout << "PASS removed slots with retained spatial bounds\n";
+}
+
 static void benchmark() {
     using Clock = std::chrono::steady_clock;
     std::cout << "workload,kernel,entities,medianNsPerQuery,checksum\n";
@@ -302,6 +359,7 @@ int main(int argc, char**) {
             if (ar::supported(kernel)) kernels.push_back(kernel);
         }
         boxQuantization();
+        removedSlots();
         differential();
         if (argc > 1) benchmark();
         return 0;
