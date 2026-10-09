@@ -6,6 +6,7 @@ import com.wiyuka.acceleratedrecoiling.natives.realtime.compat.BatchedRules;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.index.IndexedEntity;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.index.IndexedSection;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.index.RealtimeSection;
+import com.wiyuka.acceleratedrecoiling.natives.realtime.movement.BlockCollisionCache;
 import java.lang.ref.Reference;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -78,6 +79,7 @@ public final class BatchedCollisions {
 
     public static void clear() {
         FRAMES.remove();
+        BlockCollisionCache.clear();
     }
 
     @SuppressWarnings("unchecked")
@@ -279,11 +281,23 @@ public final class BatchedCollisions {
 
         int impulseXOffset = OutputField.IMPULSE_X.byteOffset(frame.entryCount);
         int impulseZOffset = OutputField.IMPULSE_Z.byteOffset(frame.entryCount);
+        ByteBuffer output = frame.output;
+        int targetSectionIndex = -1;
+        Entity[] targets = null;
+
         for (int index = 0; index < count; index++) {
-            var other = (LivingEntity) collisionTarget(frame, offset, index);
+            long hit = output.getLong(offset + index * Long.BYTES);
+            int sectionIndex = (int) (hit >>> Integer.SIZE);
+            if (sectionIndex != targetSectionIndex) {
+                targetSectionIndex = sectionIndex;
+                targets = frame.sections.get(sectionIndex).entities;
+            }
+
+            int entitySlot = (int) hit;
+            var other = (LivingEntity) targets[entitySlot];
             int impulseOffset = index * Double.BYTES;
-            double impulseX = frame.output.getDouble(impulseXOffset + impulseOffset);
-            double impulseZ = frame.output.getDouble(impulseZOffset + impulseOffset);
+            double impulseX = output.getDouble(impulseXOffset + impulseOffset);
+            double impulseZ = output.getDouble(impulseZOffset + impulseOffset);
             if (!canPushPair(source, other)) {
                 continue;
             }

@@ -64,9 +64,9 @@ final class SpatialIndex {
                 (long) origin.getZ() * SCALE
         };
 
-        int wordsPerRow = Math.addExact(capacity, Long.SIZE - 1) / Long.SIZE;
-        bytesPerRow = Math.multiplyExact(wordsPerRow, Long.BYTES);
-        int bufferBytes = Math.addExact(HEADER_BYTES, Math.multiplyExact(BITMAP_ROW_COUNT, bytesPerRow));
+        int wordsPerRow = (capacity + Long.SIZE - 1) / Long.SIZE;
+        bytesPerRow = wordsPerRow * Long.BYTES;
+        int bufferBytes = HEADER_BYTES + BITMAP_ROW_COUNT * bytesPerRow;
         bitmaps = ByteBuffer.allocateDirect(bufferBytes).order(ByteOrder.nativeOrder());
 
         for (int axis = 0; axis < AXIS_COUNT; axis++) {
@@ -77,7 +77,7 @@ final class SpatialIndex {
         bitmaps.putInt(CELL_SHIFT_OFFSET, CELL_SHIFT);
         nativeAddress = RealtimeNative.address(bitmaps);
 
-        boundCells = new byte[Math.multiplyExact(capacity, BOUNDS_FIELD_COUNT)];
+        boundCells = new byte[capacity * BOUNDS_FIELD_COUNT];
         Arrays.fill(boundCells, UNSET_CELL);
         groups = new PositionGroups(capacity, bufferBytes);
     }
