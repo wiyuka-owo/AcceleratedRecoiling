@@ -2,6 +2,7 @@
   "required": true,
   "minVersion": "0.8",
   "package": "com.wiyuka.acceleratedrecoiling.mixin",
+  "plugin": "com.wiyuka.acceleratedrecoiling.mixin.MovementMixinPlugin",
   "compatibilityLevel": "JAVA_25",
   "mixins": [
     "EntityMixin",
@@ -15,6 +16,8 @@
     "BatchedLevelAccess",
     "BatchedLivingEntityMixin",
     "BatchedMovementMixin",
+    "BlockMovementMixin",
+    "BlockSectionVersionMixin",
     "RealtimeGetterAccess",
     "RealtimeSectionMixin"
   ],
