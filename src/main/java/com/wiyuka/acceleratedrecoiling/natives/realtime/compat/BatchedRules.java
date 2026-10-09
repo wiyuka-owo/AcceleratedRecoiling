@@ -11,6 +11,16 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.EntityGetter;
 import net.minecraft.world.level.CommonLevelAccessor;
+import net.minecraft.world.level.BlockCollisions;
+import net.minecraft.world.level.CollisionGetter;
+import net.minecraft.world.level.block.AirBlock;
+import net.minecraft.world.level.block.BarrierBlock;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.phys.shapes.EntityCollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.entity.EntitySection;
@@ -113,6 +123,21 @@ public final class BatchedRules {
                 && CLEAN.get(ServerScoreboard.class) && CLEAN.get(SynchedEntityData.class)
                 && CLEAN.get(EntityGetter.class)
                 && CLEAN.get(CommonLevelAccessor.class);
+    }
+
+    public static boolean simpleBlockCollisions() {
+        return cleanWorld() && CLEAN.get(Block.class) && CLEAN.get(AirBlock.class)
+                && CLEAN.get(LevelChunk.class) && CLEAN.get(LevelChunkSection.class)
+                && CLEAN.get(BlockCollisions.class) && CLEAN.get(CollisionGetter.class)
+                && CLEAN.get(EntityCollisionContext.class);
+    }
+
+    public static boolean barrierBlockCollisions() {
+        return CLEAN.get(BarrierBlock.class);
+    }
+
+    public static boolean fullBlockMovement() {
+        return CLEAN.get(Shapes.class) && CLEAN.get(VoxelShape.class) && CLEAN.get(Shapes.block().getClass());
     }
 
     public static int classify(Entity entity) {
