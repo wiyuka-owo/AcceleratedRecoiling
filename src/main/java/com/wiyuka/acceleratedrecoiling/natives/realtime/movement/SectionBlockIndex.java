@@ -1,6 +1,5 @@
 package com.wiyuka.acceleratedrecoiling.natives.realtime.movement;
 
-import com.wiyuka.acceleratedrecoiling.natives.realtime.compat.BatchedRules;
 import java.util.BitSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
@@ -13,8 +12,6 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.phys.shapes.Shapes;
 
 public final class SectionBlockIndex {
-    private static final boolean BARRIER_SUPPORTED = BatchedRules.barrierBlockCollisions();
-
     private final BitSet dirtyBlocks = new BitSet(4096);
     private final int[] fullRows = new int[256];
     private final int[] specialRows = new int[256];
@@ -74,7 +71,7 @@ public final class SectionBlockIndex {
         var block = state.getBlock();
         var type = block.getClass();
         boolean supported = type == Block.class || type == AirBlock.class
-                || (type == BarrierBlock.class && BARRIER_SUPPORTED);
+                || type == BarrierBlock.class;
 
         if (!supported || block.hasDynamicShape() || state.hasOffsetFunction()) {
             specialRows[row] |= bit;
