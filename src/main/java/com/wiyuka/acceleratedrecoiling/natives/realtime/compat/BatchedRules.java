@@ -1,38 +1,12 @@
 package com.wiyuka.acceleratedrecoiling.natives.realtime.compat;
 
-import com.wiyuka.acceleratedrecoiling.AcceleratedRecoiling;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.index.IndexedEntity;
 import java.util.concurrent.atomic.AtomicLong;
-import net.minecraft.core.Holder;
-import net.minecraft.util.ClassInstanceMultiMap;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntitySelector;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.EntityGetter;
-import net.minecraft.world.level.CommonLevelAccessor;
-import net.minecraft.world.level.BlockCollisions;
-import net.minecraft.world.level.CollisionGetter;
-import net.minecraft.world.level.block.AirBlock;
-import net.minecraft.world.level.block.BarrierBlock;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.chunk.LevelChunk;
-import net.minecraft.world.level.chunk.LevelChunkSection;
-import net.minecraft.world.phys.shapes.EntityCollisionContext;
-import net.minecraft.world.phys.shapes.Shapes;
-import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.entity.EntitySection;
-import net.minecraft.world.level.entity.EntitySectionStorage;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.ServerScoreboard;
-import net.minecraft.world.scores.Scoreboard;
-import net.minecraft.network.syncher.SynchedEntityData;
-import net.minecraft.tags.BlockTags;
-import net.neoforged.neoforge.common.extensions.IBlockExtension;
-import net.neoforged.neoforge.common.CommonHooks;
-import org.spongepowered.asm.mixin.transformer.ClassInfo;
 
 public final class BatchedRules {
     public static final int VANILLA_CALLBACKS = -1;
@@ -52,38 +26,6 @@ public final class BatchedRules {
         POLICY.incrementAndGet();
     }
 
-    private static final ClassValue<Boolean> CLEAN = new ClassValue<>() {
-        @Override
-        protected Boolean computeValue(Class<?> type) {
-            try {
-                var info = ClassInfo.forName(type.getName());
-                while (info != null) {
-                    for (var applied : info.getAppliedMixins()) {
-                        String mixin = applied.getClassName();
-                        if (!mixin.startsWith("com.wiyuka.acceleratedrecoiling.mixin.")
-                                && !mixin.startsWith("com.wiyuka.acceleratedrecoiling.collisiontest.mixin.")
-                                && !LithiumCompatibility.allows(mixin)) {
-                            AcceleratedRecoiling.LOGGER.debug("Collision optimization disabled for {} by {}",
-                                    type.getName(), mixin);
-                            return false;
-                        }
-                    }
-
-                    if (info.getSuperName() == null) {
-                        return true;
-                    }
-                    info = info.getSuperClass();
-                }
-
-                throw new IllegalStateException("Missing class metadata");
-            } catch (RuntimeException | LinkageError e) {
-                AcceleratedRecoiling.LOGGER.warn("Could not check collision compatibility for {}; using vanilla collisions",
-                        type.getName(), e);
-                return false;
-            }
-        }
-    };
-
     private static boolean vanillaEntity(Class<?> type) {
         String vanillaPackage = Entity.class.getPackageName();
         String entityPackage = type.getPackageName();
@@ -94,14 +36,14 @@ public final class BatchedRules {
         @Override
         protected Boolean computeValue(Class<?> type) {
             return vanillaEntity(type) && LivingEntity.class.isAssignableFrom(type)
-                    && CLEAN.get(type) && CollisionMethods.inherited(type, "pushable");
+                    && CollisionMethods.inherited(type, "pushable");
         }
     };
 
     private static final ClassValue<Boolean> PLAIN_BLOCK = new ClassValue<>() {
         @Override
         protected Boolean computeValue(Class<?> type) {
-            return CLEAN.get(type) && CollisionMethods.inherited(type, "ladder");
+            return CollisionMethods.inherited(type, "ladder");
         }
     };
 
@@ -109,44 +51,15 @@ public final class BatchedRules {
         return PLAIN.get(type);
     }
 
-    public static boolean orderedSections() {
-        return CLEAN.get(EntitySection.class)
-                && CLEAN.get(ClassInstanceMultiMap.class);
-    }
-
     private static final ClassValue<Boolean> SOFT = new ClassValue<>() {
         @Override
         protected Boolean computeValue(Class<?> type) {
-            return vanillaEntity(type) && CLEAN.get(type) && CollisionMethods.inherited(type, "soft");
+            return vanillaEntity(type) && CollisionMethods.inherited(type, "soft");
         }
     };
 
     public static boolean soft(Class<?> type) {
         return SOFT.get(type);
-    }
-
-    public static boolean cleanWorld() {
-        return CLEAN.get(Level.class) && CLEAN.get(ServerLevel.class) && CLEAN.get(EntitySelector.class)
-                && CLEAN.get(EntitySectionStorage.class) && CLEAN.get(BlockState.class)
-                && CLEAN.get(Holder.Reference.class) && CLEAN.get(Scoreboard.class)
-                && CLEAN.get(ServerScoreboard.class) && CLEAN.get(SynchedEntityData.class)
-                && CLEAN.get(IBlockExtension.class) && CLEAN.get(CommonHooks.class) && CLEAN.get(EntityGetter.class)
-                && CLEAN.get(CommonLevelAccessor.class);
-    }
-
-    public static boolean simpleBlockCollisions() {
-        return cleanWorld() && CLEAN.get(Block.class) && CLEAN.get(AirBlock.class)
-                && CLEAN.get(LevelChunk.class) && CLEAN.get(LevelChunkSection.class)
-                && CLEAN.get(BlockCollisions.class) && CLEAN.get(CollisionGetter.class)
-                && CLEAN.get(EntityCollisionContext.class);
-    }
-
-    public static boolean barrierBlockCollisions() {
-        return CLEAN.get(BarrierBlock.class);
-    }
-
-    public static boolean fullBlockMovement() {
-        return CLEAN.get(Shapes.class) && CLEAN.get(VoxelShape.class) && CLEAN.get(Shapes.block().getClass());
     }
 
     public static int classify(Entity entity) {

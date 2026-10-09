@@ -16,7 +16,6 @@ public final class RealtimeSection {
     private boolean dirty = true;
     private boolean softKnown;
     private int nonSoft;
-    private final boolean ordered = BatchedRules.orderedSections();
 
     public View currentView() {
         return view;
@@ -67,7 +66,7 @@ public final class RealtimeSection {
     }
 
     private boolean shouldRebuildView(Object object) {
-        return !(object instanceof Entity) || !ordered || dirty || !view.canAdd();
+        return !(object instanceof Entity) || dirty || !view.canAdd();
     }
 
     public void removed(Object entity) {
@@ -81,7 +80,7 @@ public final class RealtimeSection {
         }
 
         int slot = indexed.ar$sectionSlot();
-        if (!ordered || dirty || indexed.ar$section() != this
+        if (dirty || indexed.ar$section() != this
                 || !view.remove(entity, slot)) {
             dirty = true;
         } else {
