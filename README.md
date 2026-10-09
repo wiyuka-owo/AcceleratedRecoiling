@@ -61,7 +61,7 @@ Gradle 将下载位于 GitHub Release 中的由 `cpp_toolchain_version` 指定�
 
 ## 支持与赞助
 
-如果你喜欢 **加速碰撞 (Accelerated Recoiling)**，欢迎来 **[这里](https://github.com/wiyuka-owo/AcceleratedRecoiling/blob/master/3ae91be2c6a1e7447635b7b1b7454ffc.jpeg)** 请wiyuka吃一顿带鱼哦 owo
+如果你喜欢 **加速碰撞 (Accelerated Recoiling)**，欢迎来 **[这里](3ae91be2c6a1e7447635b7b1b7454ffc.jpeg)** 请wiyuka吃一顿带鱼哦 owo
 
 ## 鸣谢与开源协议
 
