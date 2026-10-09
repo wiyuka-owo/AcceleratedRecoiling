@@ -54,6 +54,16 @@ struct TestSpatialIndex {
         }
     }
 
+    void remove(int slot) {
+        auto* index = reinterpret_cast<ar::SpatialIndex*>(storage.data());
+        const auto bit = std::uint64_t(1) << (slot % 64);
+        for (auto kind : {ar::SpatialIndex::ELIGIBLE, ar::SpatialIndex::FALLBACK}) {
+            auto* row = const_cast<std::uint64_t*>(index->entityBitmap(kind));
+            row[slot / 64] &= ~bit;
+        }
+        coincident[slot / 64] &= ~bit;
+    }
+
     void attach(ar::Section& section) const {
         section.spatial = reinterpret_cast<const ar::SpatialIndex*>(storage.data());
         section.coincident = coincident.data();
