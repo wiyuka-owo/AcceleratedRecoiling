@@ -83,7 +83,7 @@ public final class BatchedCollisions {
 
     @SuppressWarnings("unchecked")
     public static boolean noEntityObstacles(Entity source, AABB area) {
-        if (source.level().getClass() != ServerLevel.class || !BatchedRules.cleanWorld()
+        if (source.level().getClass() != ServerLevel.class
                 || !BatchedRules.plain(source.getClass())) {
             return false;
         }
@@ -149,7 +149,6 @@ public final class BatchedCollisions {
 
     private static boolean canPush(LivingEntity source) {
         return source.level().getClass() == ServerLevel.class
-                && BatchedRules.cleanWorld()
                 && BatchedRules.classify(source, true) == BatchedRules.PUSHABLE;
     }
 
