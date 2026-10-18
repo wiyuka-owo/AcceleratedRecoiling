@@ -84,6 +84,9 @@ static void check(const std::vector<Input>& inputs, const ar::Query& query, int 
 
     for (bool computeImpulses : {false, true}) {
         for (bool retainCollisions : {true, false}) {
+            if (query.candidatesOnly && (computeImpulses || !retainCollisions)) {
+                continue;
+            }
             auto requested = query;
             requested.retainCollisions = retainCollisions;
             requested.computeImpulses = computeImpulses;
@@ -261,9 +264,50 @@ static void differential() {
             query.sourceSlot = caseIndex % std::max(1, inputs[query.sourceSection].count);
         }
         check(inputs, query, caseIndex);
+        query.candidatesOnly = true;
+        check(inputs, query, caseIndex);
     }
     check({}, ar::Query{{0, 0, 0, 1, 1, 1}, 0, 0, -1, -1}, caseCount);
     std::cout << "PASS " << checks << " kernel/oracle comparisons (ordered outputs, counts, fallback and guards)\n";
+}
+
+static void callbackCandidates() {
+    Input input(1033);
+    for (int slot = 0; slot < input.count; ++slot) {
+        const double flag = slot % 3 == 0 ? 0 : slot % 3 == 1 ? -1 : 1;
+        input.put(slot, {.1, .1, .1, .9, .9, .9}, infinity, infinity, flag);
+    }
+    input.put(63, {2, 2, 2, 3, 3, 3}, 0, 0, -2);
+    input.put(64, {.1, .1, .1, .9, .9, .9}, 0, 0, -2);
+    ar::Query query{{0, 0, 0, 1, 1, 1}, infinity, infinity, 0, 64};
+    query.candidatesOnly = true;
+    std::vector<std::int64_t> expected;
+    for (int slot = 0; slot < input.count; ++slot) {
+        if (slot % 3 != 0 && slot != 64) {
+            expected.push_back(slot);
+        }
+    }
+
+    for (auto kernel : kernels) {
+        auto section = input.section();
+        TestSpatialIndex index(input, query);
+        index.attach(section);
+        std::vector<std::int64_t> output(input.count * 2, sentinel);
+        const auto count = ar::batch(kernel, &section, 1, input.count, output.data(), query);
+        if (count != static_cast<std::int64_t>(expected.size()) << 32
+                || !std::equal(expected.begin(), expected.end(), output.begin())) {
+            throw std::runtime_error("Incorrect mixed callback candidates");
+        }
+    }
+    check({input}, query, 24001);
+    query.sourceSlot = -1;
+    auto section = input.section();
+    std::vector<std::int64_t> output(input.count * 2);
+    if (ar::batch(ar::Kernel::Scalar, &section, 1, input.count, output.data(), query) != -1) {
+        throw std::runtime_error("Unknown callback was not rejected");
+    }
+    check({input}, query, 24002);
+    std::cout << "PASS mixed callbacks, coincident candidates, source exclusion and unknown callbacks\n";
 }
 
 static void removedSlots() {
@@ -360,6 +404,7 @@ int main(int argc, char**) {
         }
         boxQuantization();
         removedSlots();
+        callbackCandidates();
         differential();
         if (argc > 1) benchmark();
         return 0;

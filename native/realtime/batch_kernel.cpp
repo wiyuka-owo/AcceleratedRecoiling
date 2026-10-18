@@ -67,10 +67,16 @@ static bool scalarCandidate(const double* data, int stride, int section, int slo
     }
 
     const double flag = data[FLAGS * stride + slot];
-    if (flag < 0) {
+    if (flag < (q.candidatesOnly ? -1 : 0)) {
         return false;
     }
     if (flag == 0) {
+        return true;
+    }
+
+    const std::int64_t hit = (std::int64_t(section) << 32) | std::uint32_t(slot);
+    if (q.candidatesOnly) {
+        output[selected++] = hit;
         return true;
     }
 
@@ -80,7 +86,6 @@ static bool scalarCandidate(const double* data, int stride, int section, int slo
         return false;
     }
 
-    const std::int64_t hit = (std::int64_t(section) << 32) | std::uint32_t(slot);
     if constexpr (RetainCollisions) {
         output[selected] = hit;
     }
@@ -404,7 +409,7 @@ const char* kernelName(Kernel kernel) {
 template<bool RetainCollisions>
 static std::int64_t batchWithOutput(Kernel kernel, const Section* plan, int sectionCount, int entries,
         std::int64_t* output, const Query& q) {
-    if (!std::isfinite(q.x) || !std::isfinite(q.z)) {
+    if (!q.candidatesOnly && (!std::isfinite(q.x) || !std::isfinite(q.z))) {
         return -1;
     }
 
@@ -474,7 +479,7 @@ static void calculateImpulses(Kernel kernel, int count, std::int64_t* outputX, s
 
 std::int64_t batch(Kernel kernel, const Section* sections, int sectionCount, int entries,
         std::int64_t* output, const Query& query) {
-    const auto result = query.retainCollisions
+    const auto result = (query.retainCollisions || query.candidatesOnly)
             ? batchWithOutput<true>(kernel, sections, sectionCount, entries, output, query)
             : batchWithOutput<false>(kernel, sections, sectionCount, entries, output, query);
     if (result >= 0 && query.computeImpulses) {

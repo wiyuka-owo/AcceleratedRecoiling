@@ -11,15 +11,15 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 public final class FullBlockCollisions extends AbstractList<VoxelShape> {
-    static final FullBlockCollisions EMPTY = new FullBlockCollisions(new FullBlockGrid(0, 0, 0), new long[0], 0);
+    static final FullBlockCollisions EMPTY = new FullBlockCollisions(new BlockCollisionRegion(0, 0, 0, 0, 0, 0), new long[0], 0);
     private static final double EPSILON = 1.0E-7;
 
-    private final FullBlockGrid grid;
+    private final BlockCollisionRegion grid;
     private final long[] collisionLayers;
     private final int size;
     private VoxelShape[] cachedShapes;
 
-    FullBlockCollisions(FullBlockGrid grid, long[] collisionLayers, int size) {
+    FullBlockCollisions(BlockCollisionRegion grid, long[] collisionLayers, int size) {
         this.grid = grid;
         this.collisionLayers = collisionLayers;
         this.size = size;
@@ -111,8 +111,8 @@ public final class FullBlockCollisions extends AbstractList<VoxelShape> {
                 int bitIndex = Long.numberOfTrailingZeros(remainingBlocks);
                 remainingBlocks &= remainingBlocks - 1;
 
-                int blockX = grid.minX + (bitIndex & (FullBlockGrid.EDGE - 1));
-                int blockY = grid.minY + (bitIndex >> FullBlockGrid.ROW_SHIFT);
+                int blockX = grid.minX + (bitIndex & (BlockCollisionRegion.EDGE - 1));
+                int blockY = grid.minY + (bitIndex >> BlockCollisionRegion.ROW_SHIFT);
                 int blockZ = grid.minZ + localZ;
 
                 boolean overlapsOtherAxes = switch (axis) {
@@ -187,14 +187,14 @@ public final class FullBlockCollisions extends AbstractList<VoxelShape> {
         }
 
         int surfaceMask = 0;
-        long rowMask = (1L << FullBlockGrid.EDGE) - 1;
-        for (int localY = 0; localY < FullBlockGrid.EDGE; localY++) {
+        long rowMask = (1L << BlockCollisionRegion.EDGE) - 1;
+        for (int localY = 0; localY < BlockCollisionRegion.EDGE; localY++) {
             if ((occupiedRows & rowMask) != 0) {
                 int bottomFace = 1 << localY;
                 int topFace = 1 << (localY + 1);
                 surfaceMask |= bottomFace | topFace;
             }
-            occupiedRows >>>= FullBlockGrid.EDGE;
+            occupiedRows >>>= BlockCollisionRegion.EDGE;
         }
 
         return surfaceMask;

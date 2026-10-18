@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.AbortableIterationConsumer.Continuation;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntitySelector;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.entity.EntitySectionStorage;
@@ -54,6 +55,7 @@ public final class BatchedCollisions {
 
     private static final class Frame {
         final ArrayList<RealtimeSection.View> sections = new ArrayList<>();
+        final ArrayList<Entity> callbackTargets = new ArrayList<>();
 
         ByteBuffer sectionDescriptors = buffer(256);
         ByteBuffer output = buffer(4096);
@@ -70,6 +72,31 @@ public final class BatchedCollisions {
                 output = buffer(Math.multiplyExact(entryCount, OUTPUT_BYTES_PER_ENTRY * 2));
             }
         }
+
+        void prepareSectionDescriptors(LivingEntity source) {
+            Frame frame = this;
+
+            frame.ensureCapacity();
+
+            var owner = ((IndexedEntity) source).ar$section();
+            var sourceView = owner == null ? null : owner.currentView();
+            frame.sourceSection = -1;
+
+            for (int sectionIndex = 0; sectionIndex < frame.sections.size(); sectionIndex++) {
+                var section = frame.sections.get(sectionIndex);
+                if (section == sourceView) {
+                    frame.sourceSection = sectionIndex;
+                }
+
+                int offset = sectionIndex * SECTION_DESCRIPTOR_BYTES;
+                frame.sectionDescriptors.putLong(offset + SECTION_ADDRESS_OFFSET, section.address);
+                frame.sectionDescriptors.putInt(offset + SECTION_COUNT_OFFSET, section.count());
+                frame.sectionDescriptors.putInt(offset + SECTION_STRIDE_OFFSET, section.stride);
+                frame.sectionDescriptors.putLong(offset + SECTION_SPATIAL_OFFSET, section.spatialAddress());
+                frame.sectionDescriptors.putLong(offset + SECTION_COINCIDENT_OFFSET,
+                        section.coincidentAddress(source.getX(), source.getZ()));
+            }
+        }
     }
 
     private static ByteBuffer buffer(int bytes) {
@@ -79,35 +106,6 @@ public final class BatchedCollisions {
     public static void clear() {
         FRAMES.remove();
         BlockCollisionCache.clear();
-    }
-
-    @SuppressWarnings("unchecked")
-    public static boolean noEntityObstacles(Entity source, AABB area) {
-        if (source.level().getClass() != ServerLevel.class
-                || !BatchedRules.plain(source.getClass())) {
-            return false;
-        }
-        ServerLevel level = (ServerLevel) source.level();
-
-        if (!((BatchedLevelAccess) level).ar$dragonParts().isEmpty()) return false;
-
-        var getter = ((BatchedLevelAccess) level).ar$entities();
-
-        if (getter.getClass() != LevelEntityGetterAdapter.class) return false;
-        var access = (RealtimeGetterAccess<Entity>) getter;
-
-        boolean[] empty = { true };
-        access.ar$sectionStorage().forEachAccessibleNonEmptySection(area.inflate(1.0E-7), section -> {
-            if (!((IndexedSection) section).ar$realtimeSection().softOnly(section)) {
-                empty[0] = false;
-                return Continuation.ABORT;
-            }
-            return Continuation.CONTINUE;
-        });
-        if (empty[0] && !(area.getSize() < 1.0E-7)) {
-            level.getProfiler().incrementCounter("getEntities");
-        }
-        return empty[0];
     }
 
     @SuppressWarnings("unchecked")
@@ -135,90 +133,82 @@ public final class BatchedCollisions {
         try {
             long epoch = BatchedRules.epoch();
             var bounds = source.getBoundingBox();
-            if (!collectSections(frame, storage, bounds, epoch)) return false;
 
-            prepareSectionDescriptors(frame, source);
+            collectSections(frame, storage, bounds, epoch);
+
+            frame.prepareSectionDescriptors(source);
             return queryAndPush(source, level, bounds, frame);
         } finally {
             Reference.reachabilityFence(frame.sections);
             for (var section : frame.sections) section.release();
             frame.sections.clear();
+            frame.callbackTargets.clear();
             frames.addFirst(frame);
         }
     }
 
     private static boolean canPush(LivingEntity source) {
-        return source.level().getClass() == ServerLevel.class
-                && BatchedRules.classify(source, true) == BatchedRules.PUSHABLE;
+        if (source.level().getClass() != ServerLevel.class) {
+            return false;
+        }
+        var classification = BatchedRules.classify(source, true);
+        return classification == CollisionResult.ACCEPTED || classification == CollisionResult.CALLBACKS;
     }
 
-    private static boolean collectSections(Frame frame,
-                                           EntitySectionStorage<Entity> storage,
-                                           AABB bounds,
-                                           long epoch) {
-        boolean[] supported = { true };
+    private static void collectSections(Frame frame, EntitySectionStorage<Entity> storage,
+            AABB bounds, long epoch) {
         frame.entryCount = 0;
 
         storage.forEachAccessibleNonEmptySection(bounds, section -> {
             var index = ((IndexedSection) section).ar$realtimeSection();
             var view = index.view(section);
-            if (view == null) {
-                supported[0] = false;
-                return Continuation.ABORT;
-            }
-
             index.prepareBatch(epoch);
             frame.sections.add(view.retain());
             frame.entryCount = Math.addExact(frame.entryCount, view.count());
             return Continuation.CONTINUE;
         });
-
-        return supported[0];
-    }
-
-    private static void prepareSectionDescriptors(Frame frame, LivingEntity source) {
-        frame.ensureCapacity();
-
-        var owner = ((IndexedEntity) source).ar$section();
-        var sourceView = owner == null ? null : owner.currentView();
-        frame.sourceSection = -1;
-
-        for (int sectionIndex = 0; sectionIndex < frame.sections.size(); sectionIndex++) {
-            var section = frame.sections.get(sectionIndex);
-            if (section == sourceView) {
-                frame.sourceSection = sectionIndex;
-            }
-
-            int offset = sectionIndex * SECTION_DESCRIPTOR_BYTES;
-            frame.sectionDescriptors.putLong(offset + SECTION_ADDRESS_OFFSET, section.address);
-            frame.sectionDescriptors.putInt(offset + SECTION_COUNT_OFFSET, section.count());
-            frame.sectionDescriptors.putInt(offset + SECTION_STRIDE_OFFSET, section.stride);
-            frame.sectionDescriptors.putLong(offset + SECTION_SPATIAL_OFFSET, section.spatialAddress());
-            frame.sectionDescriptors.putLong(offset + SECTION_COINCIDENT_OFFSET,
-                    section.coincidentAddress(source.getX(), source.getZ()));
-        }
     }
 
     private static boolean queryAndPush(LivingEntity source,
                                         ServerLevel level,
                                         AABB bounds,
                                         Frame frame) {
+        if (BatchedRules.classify(source, true) != CollisionResult.ACCEPTED) {
+            return queryAndPushCallbacks(source, level, bounds, frame);
+        }
+
         IndexedEntity indexedSource = (IndexedEntity) source;
         int crammingLimit = level.getGameRules().getInt(GameRules.RULE_MAX_ENTITY_CRAMMING);
-        long counts = RealtimeNative.queryBatch(frame.sectionDescriptors, frame.sections.size(), frame.output, frame.sourceSection,
-                indexedSource.ar$sectionSlot(), source.getX(), source.getZ(),
-                bounds.minX, bounds.minY, bounds.minZ, bounds.maxX, bounds.maxY, bounds.maxZ,
-                crammingLimit > 0, NATIVE_PUSH);
+        boolean retainCollisions = crammingLimit > 0;
+        long counts = RealtimeNative.queryBatch(frame.sectionDescriptors,
+                frame.sections.size(),
+                frame.output,
+                frame.sourceSection,
+                indexedSource.ar$sectionSlot(),
+                source.getX(),
+                source.getZ(),
+                bounds.minX,
+                bounds.minY,
+                bounds.minZ,
+                bounds.maxX,
+                bounds.maxY,
+                bounds.maxZ,
+                retainCollisions,
+                NATIVE_PUSH);
         if (counts == -1) {
-            return false;
+            return queryAndPushCallbacks(source, level, bounds, frame);
         }
 
         if (counts < 0) {
             throw new IllegalStateException("Invalid native batch result: " + counts);
         }
 
-        int collisionCount = (int) (counts >>> Integer.SIZE);
+        // counts -->
+        // ----------- collisionCount -------------   -------------- pushCount ---------------
+        // 0000 0000 0000 0000  0000 0000 0000 0000   0000 0000 0000 0000  0000 0000 0000 0000
+        int collisionCount = (int) (counts >>> 32);
         int pushCount = (int) counts;
+
         if (pushCount < 0 || pushCount > collisionCount || collisionCount > frame.entryCount) {
             throw new IllegalStateException("Invalid native batch counts");
         }
@@ -229,13 +219,64 @@ public final class BatchedCollisions {
         return true;
     }
 
+    private static boolean queryAndPushCallbacks(LivingEntity source, ServerLevel level, AABB bounds, Frame frame) {
+        long result = RealtimeNative.queryCandidates(frame.sectionDescriptors, frame.sections.size(), frame.output,
+                frame.sourceSection, ((IndexedEntity) source).ar$sectionSlot(),
+                bounds.minX, bounds.minY, bounds.minZ, bounds.maxX, bounds.maxY, bounds.maxZ);
+        if (result == -1) {
+            return false;
+        }
+
+        int candidateCount = (int) (result >>> Integer.SIZE);
+        if (result < 0 || candidateCount > frame.entryCount || (int) result != 0) {
+            throw new IllegalStateException("Invalid native candidate result: " + result);
+        }
+
+        var pushable = EntitySelector.pushableBy(source);
+        int offset = OutputField.COLLISIONS.byteOffset(frame.entryCount);
+        level.getProfiler().incrementCounter("getEntities");
+        for (int index = 0; index < candidateCount; index++) {
+            Entity candidate = collisionTarget(frame, offset, index);
+            if (pushable.test(candidate)) {
+                frame.callbackTargets.add(candidate);
+            }
+        }
+
+        dispatchCallbacks(source, level, frame.callbackTargets);
+        return true;
+    }
+
+    private static void dispatchCallbacks(LivingEntity source, ServerLevel level, ArrayList<Entity> targets) {
+        if (targets.isEmpty()) {
+            return;
+        }
+
+        int crammingLimit = level.getGameRules().getInt(GameRules.RULE_MAX_ENTITY_CRAMMING);
+        if (crammingLimit > 0 && targets.size() > crammingLimit - 1
+                && source.getRandom().nextInt(4) == 0) {
+            int nonPassengers = 0;
+            for (Entity candidate : targets) {
+                if (!candidate.isPassenger()) {
+                    nonPassengers++;
+                }
+            }
+            if (nonPassengers > crammingLimit - 1) {
+                source.hurt(source.damageSources().cramming(), 6.0F);
+            }
+        }
+
+        for (Entity candidate : targets) {
+            ((LivingEntityDoPushInvoker) source).ar$doPush(candidate);
+        }
+    }
+
     private static void dispatchPushes(LivingEntity source,
                                       Frame frame,
                                       int collisionCount,
                                       int pushCount,
                                       int crammingLimit) {
         boolean crammingAttempted = false;
-        if (collisionCount > 0 && crammingLimit > 0 && collisionCount > crammingLimit - 1
+        if (crammingLimit > 0 && collisionCount > crammingLimit - 1
                 && source.getRandom().nextInt(4) == 0) {
             source.hurt(source.damageSources().cramming(), 6.0F);
             crammingAttempted = true;
@@ -270,6 +311,7 @@ public final class BatchedCollisions {
         double velocityX = velocity.x;
         double velocityY = velocity.y;
         double velocityZ = velocity.z;
+
         boolean sourcePushabilityChecked = false;
         boolean sourcePushable = false;
         boolean sourceHasImpulse = false;
