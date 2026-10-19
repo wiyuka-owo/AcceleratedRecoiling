@@ -27,16 +27,12 @@ final class PositionGroups {
 
     PositionGroups(int capacity, int bitmapBudget) {
         entityGroups = new PositionGroup[capacity];
-        int wordsPerBitmap = Math.addExact(capacity, Long.SIZE - 1) / Long.SIZE;
-        bytesPerBitmap = Math.multiplyExact(wordsPerBitmap, Long.BYTES);
+        int wordsPerBitmap = (capacity + Long.SIZE - 1) / Long.SIZE;
+        bytesPerBitmap = wordsPerBitmap * Long.BYTES;
         this.bitmapBudget = bitmapBudget;
     }
 
     long coincidentAddress(double x, double z) {
-        if (!Double.isFinite(x) || !Double.isFinite(z)) {
-            return 0;
-        }
-
         PositionGroup group = findGroup(x, z);
         if (group == null || group.memberCount < MIN_GROUP_SIZE) {
             return 0;
