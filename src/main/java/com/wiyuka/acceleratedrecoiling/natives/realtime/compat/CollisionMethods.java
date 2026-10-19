@@ -88,7 +88,8 @@ final class CollisionMethods {
             var references = new HashMap<String, List<MethodInsnNode>>();
 
             for (var method : type.methods) {
-                if (!method.name.equals("pushable") && !method.name.equals("soft")) {
+                if (!method.name.equals("pushable") && !method.name.equals("soft")
+                        && !method.name.equals("queryable") && !method.name.equals("obstacleSource")) {
                     continue;
                 }
 
@@ -137,5 +138,22 @@ final class CollisionMethods {
     private static void soft(Entity entity) {
         entity.canBeCollidedWith(entity);
         entity.isSpectator();
+    }
+
+    private static void queryable(LivingEntity living, Entity entity) {
+        living.isPushable();
+        living.onClimbable();
+        living.isAlive();
+        living.getHealth();
+        entity.getTeam();
+        entity.isSpectator();
+        entity.isAlwaysTicking();
+        entity.getInBlockState();
+        entity.isPassenger();
+        entity.isVehicle();
+    }
+
+    private static void obstacleSource(Entity entity) {
+        entity.canCollideWith(entity);
     }
 }
