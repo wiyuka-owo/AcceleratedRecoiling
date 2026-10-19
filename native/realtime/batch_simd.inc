@@ -44,6 +44,7 @@ static std::int64_t AR_BATCH(const Section* sections, int sectionCount, int entr
     const auto pushThreshold = AR_SETD(static_cast<double>(0.01f));
     const auto maxFinite = AR_SETD(DBL_MAX);
     const auto zero = AR_SETD(0.0);
+    const auto minimumFlag = AR_SETD(query.candidatesOnly ? -1.0 : 0.0);
 
     const auto queryMinX = AR_SETD(query.bounds[BOUNDS_MIN_X]);
     const auto queryMinY = AR_SETD(query.bounds[BOUNDS_MIN_Y]);
@@ -53,7 +54,10 @@ static std::int64_t AR_BATCH(const Section* sections, int sectionCount, int entr
     const auto queryMaxZ = AR_SETD(query.bounds[BOUNDS_MAX_Z]);
 
     std::int32_t quantizedQueryBounds[6];
-    quantizeBox(query.bounds, quantizedQueryBounds);
+    for (int field = BOUNDS_MIN_X; field <= BOUNDS_MAX_Z; ++field) {
+        quantizedQueryBounds[field] = quantize(query.bounds[field]);
+    }
+
     const auto quantizedQueryMinX = AR_SETI(quantizedQueryBounds[BOUNDS_MIN_X]);
     const auto quantizedQueryMinY = AR_SETI(quantizedQueryBounds[BOUNDS_MIN_Y]);
     const auto quantizedQueryMinZ = AR_SETI(quantizedQueryBounds[BOUNDS_MIN_Z]);
@@ -166,13 +170,20 @@ static std::int64_t AR_BATCH(const Section* sections, int sectionCount, int entr
                 }
 
                 const auto flags = AR_LOADD(groupData + FLAGS * stride);
-                const unsigned fallbackMask = AR_LT(flags, zero);
+                const unsigned fallbackMask = AR_LT(flags, minimumFlag);
                 if (collisionMask & fallbackMask) {
                     return -1;
                 }
                 const unsigned rejectedMask = AR_EQ(flags, zero);
                 collisionMask &= ~rejectedMask;
                 if (collisionMask == 0) {
+                    continue;
+                }
+
+                const std::int64_t firstHit = (std::int64_t(section) << 32) | std::uint32_t(firstSlot);
+                if (query.candidatesOnly) {
+                    AR_STORE(output + collisionCount, firstHit, collisionMask);
+                    collisionCount += std::popcount(collisionMask);
                     continue;
                 }
 
@@ -188,7 +199,6 @@ static std::int64_t AR_BATCH(const Section* sections, int sectionCount, int entr
                 const unsigned pushZMask = AR_LE(pushThreshold, AR_ABS(AR_SUB(sourceZ, candidateZ)));
                 const unsigned pushMask = collisionMask & (pushXMask | pushZMask);
 
-                const std::int64_t firstHit = (std::int64_t(section) << 32) | std::uint32_t(firstSlot);
                 if constexpr (RetainCollisions) {
                     AR_STORE(output + collisionCount, firstHit, collisionMask);
                 }

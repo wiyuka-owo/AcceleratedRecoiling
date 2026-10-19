@@ -10,6 +10,7 @@
     "PushableMemoryMixin",
     "ServerLevelMixin",
     "ClimbableTagMixin",
+    "ClimbableBlockMixin",
     "BatchedEntityStateMixin",
     "BatchedSyncedStateMixin",
     "BatchedScoreboardMixin",
@@ -17,6 +18,9 @@
     "BatchedLivingEntityMixin",
     "BatchedMovementMixin",
     "BlockMovementMixin",
+    "BlockCollisionMixin",
+    "BoatCollisionMixin",
+    "VoxelShapeAccess",
     "BlockSectionVersionMixin",
     "RealtimeGetterAccess",
     "RealtimeSectionMixin"
