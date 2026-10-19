@@ -70,8 +70,8 @@ public final class SectionBlockIndex {
 
         var block = state.getBlock();
         var type = block.getClass();
-        boolean supported = type == Block.class || type == AirBlock.class
-                || type == BarrierBlock.class;
+        boolean supported = state.getClass() == BlockState.class
+                && (type == Block.class || type == AirBlock.class || type == BarrierBlock.class);
 
         if (!supported || block.hasDynamicShape() || state.hasOffsetFunction()) {
             specialRows[row] |= bit;
@@ -86,7 +86,11 @@ public final class SectionBlockIndex {
         }
     }
 
-    int row(int y, int z, int interiorMask, int edgeMask, int borderAxes) {
+    boolean hasSpecial(int y, int z, int candidates) {
+        return (specialRows[z * 16 + y] & candidates) != 0;
+    }
+
+    int candidates(int y, int z, int interiorMask, int edgeMask, int borderAxes) {
         int row = z * 16 + y;
         int candidates = switch (borderAxes) {
             case 0 -> interiorMask | (edgeMask & largeRows[row]);
@@ -94,9 +98,6 @@ public final class SectionBlockIndex {
             default -> interiorMask & pistonRows[row];
         };
 
-        if ((specialRows[row] & candidates) != 0) {
-            return -1;
-        }
-        return fullRows[row] & candidates;
+        return (fullRows[row] | specialRows[row]) & candidates;
     }
 }

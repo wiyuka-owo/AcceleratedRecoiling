@@ -9,7 +9,8 @@ import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
 public final class MovementMixinPlugin implements IMixinConfigPlugin {
     @Override
     public boolean shouldApplyMixin(String target, String mixin) {
-        if (mixin.endsWith(".BlockMovementMixin") || mixin.endsWith(".BlockSectionVersionMixin")) {
+        if (mixin.endsWith(".BlockMovementMixin") || mixin.endsWith(".BlockSectionVersionMixin")
+                || mixin.endsWith(".BlockCollisionMixin") || mixin.endsWith(".BoatCollisionMixin")) {
             return Boolean.parseBoolean(System.getProperty("ar.experimental.blockMovement", "true"));
         }
         return true;
