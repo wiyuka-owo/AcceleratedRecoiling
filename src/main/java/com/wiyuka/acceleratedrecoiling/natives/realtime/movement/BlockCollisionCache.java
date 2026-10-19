@@ -2,9 +2,13 @@ package com.wiyuka.acceleratedrecoiling.natives.realtime.movement;
 
 import com.wiyuka.acceleratedrecoiling.natives.realtime.RealtimeNative;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.compat.BatchedRules;
+import net.minecraft.core.Cursor3D;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.ExperienceOrb;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.level.CollisionGetter;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
@@ -14,74 +18,8 @@ public final class BlockCollisionCache {
     private static final int CACHE_SIZE = 128;
     private static final boolean FULL_BLOCK_MOVEMENT = Boolean.parseBoolean(
             System.getProperty("ar.experimental.fullBlockMovement", "true"));
-    private static final ThreadLocal<CachedRegion[]> CACHE = ThreadLocal.withInitial(() -> new CachedRegion[CACHE_SIZE]);
-
-    private record SectionSnapshot(
-            int sectionY,
-            LevelChunkSection section,
-            long version) {
-
-        boolean isUnchanged(LevelChunk chunk) {
-            int sectionIndex = chunk.getSectionIndex(sectionY << 4);
-            var currentSection = chunk.getSection(sectionIndex);
-            if (currentSection != section) {
-                return false;
-            }
-
-            long currentVersion = ((VersionedBlockSection) section).ar$blockVersion();
-            return currentVersion == version;
-        }
-    }
-
-    private record ChunkSnapshot(int chunkX, int chunkZ, SectionSnapshot[] sections) {
-
-        boolean isUnchanged(Level level) {
-            var currentChunk = level.getChunkForCollisions(chunkX, chunkZ);
-            if (currentChunk == null || currentChunk.getClass() != LevelChunk.class) {
-                return false;
-            }
-
-            var chunk = (LevelChunk) currentChunk;
-            for (var section : sections) {
-                if (!section.isUnchanged(chunk)) {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-    }
-
-    private record CachedRegion(
-            int minX, int minY, int minZ,
-            int maxX, int maxY, int maxZ,
-            ChunkSnapshot[] chunks,
-            FullBlockGrid blocks) {
-
-        boolean canReuse(Level level,
-                int queryMinX, int queryMinY, int queryMinZ,
-                int queryMaxX, int queryMaxY, int queryMaxZ) {
-            if (!matchesBounds(queryMinX, queryMinY, queryMinZ, queryMaxX, queryMaxY, queryMaxZ)) {
-                return false;
-            }
-
-            for (var chunk : chunks) {
-                if (!chunk.isUnchanged(level)) {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        private boolean matchesBounds(
-                int queryMinX, int queryMinY, int queryMinZ,
-                int queryMaxX, int queryMaxY, int queryMaxZ) {
-            return minX == queryMinX && maxX == queryMaxX
-                    && minY == queryMinY && maxY == queryMaxY
-                    && minZ == queryMinZ && maxZ == queryMaxZ;
-        }
-    }
+    private static final ThreadLocal<BlockCollisionRegion[]> CACHE =
+            ThreadLocal.withInitial(() -> new BlockCollisionRegion[CACHE_SIZE]);
 
     private BlockCollisionCache() {
     }
@@ -95,6 +33,27 @@ public final class BlockCollisionCache {
             return null;
         }
 
+        var region = region(level, area);
+        if (region == null || !region.fullBlocksOnly) {
+            return null;
+        }
+        return region.intersect(area);
+    }
+
+    public static Cursor3D cursor(CollisionGetter getter, AABB area, boolean onlySuffocating) {
+        if (onlySuffocating || !RealtimeNative.isEnabled() || getter.getClass() != ServerLevel.class) {
+            return null;
+        }
+        var level = (ServerLevel) getter;
+        if (!level.getServer().isSameThread()) {
+            return null;
+        }
+
+        var region = region(level, area);
+        return region == null ? null : new BlockCollisionCursor(level, area, region);
+    }
+
+    static BlockCollisionRegion region(Level level, AABB area) {
         int minX = Mth.floor(area.minX - 1.0E-7) - 1;
         int minY = Mth.floor(area.minY - 1.0E-7) - 1;
         int minZ = Mth.floor(area.minZ - 1.0E-7) - 1;
@@ -103,9 +62,9 @@ public final class BlockCollisionCache {
         int maxZ = Mth.floor(area.maxZ + 1.0E-7) + 1;
 
         if (minX > maxX || minY > maxY || minZ > maxZ
-                || (long) maxX - minX >= FullBlockGrid.EDGE
-                || (long) maxY - minY >= FullBlockGrid.EDGE
-                || (long) maxZ - minZ >= FullBlockGrid.EDGE
+                || (long) maxX - minX >= BlockCollisionRegion.EDGE
+                || (long) maxY - minY >= BlockCollisionRegion.EDGE
+                || (long) maxZ - minZ >= BlockCollisionRegion.EDGE
                 || level.isOutsideBuildHeight(minY) || level.isOutsideBuildHeight(maxY)) {
             return null;
         }
@@ -123,10 +82,7 @@ public final class BlockCollisionCache {
             cache[slot] = cachedRegion;
         }
 
-        if (cachedRegion.blocks == null) {
-            return null;
-        }
-        return cachedRegion.blocks.intersect(area);
+        return cachedRegion;
     }
 
     public static FullBlockCollisions fullBlocks(Entity source, Level level, AABB area) {
@@ -140,7 +96,9 @@ public final class BlockCollisionCache {
     private static boolean canCache(Entity source, Level level) {
         return RealtimeNative.isEnabled() && source != null
                 && level.getClass() == ServerLevel.class
-                && BatchedRules.plain(source.getClass()) && level.getServer().isSameThread();
+                && level.getServer().isSameThread()
+                && (BatchedRules.plain(source.getClass()) || source.getClass() == ExperienceOrb.class
+                        || source.getClass() == ItemEntity.class);
     }
 
     private static int hash128(
@@ -156,7 +114,7 @@ public final class BlockCollisionCache {
         return (hash ^ (hash >>> 16)) & (CACHE_SIZE - 1);
     }
 
-    private static CachedRegion buildRegion(Level level,
+    private static BlockCollisionRegion buildRegion(Level level,
             int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
         int minChunkX = minX >> 4;
         int minChunkZ = minZ >> 4;
@@ -165,8 +123,7 @@ public final class BlockCollisionCache {
         int minSectionY = minY >> 4;
         int maxSectionY = maxY >> 4;
 
-        var chunks = new ChunkSnapshot[(maxChunkX - minChunkX + 1) * (maxChunkZ - minChunkZ + 1)];
-        var blocks = new FullBlockGrid(minX, minY, minZ);
+        var region = new BlockCollisionRegion(minX, minY, minZ, maxX, maxY, maxZ);
         int index = 0;
 
         for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
@@ -177,72 +134,61 @@ public final class BlockCollisionCache {
                 }
 
                 var chunk = (LevelChunk) getter;
-                var sections = new SectionSnapshot[maxSectionY - minSectionY + 1];
-
+                var snapshot = region.captureChunk(index++, chunkX, chunkZ);
                 for (int sectionY = minSectionY; sectionY <= maxSectionY; sectionY++) {
                     var section = chunk.getSection(chunk.getSectionIndex(sectionY << 4));
                     if (section.getClass() != LevelChunkSection.class) {
                         return null;
                     }
 
-                    long version = ((VersionedBlockSection) section).ar$blockVersion();
-                    sections[sectionY - minSectionY] = new SectionSnapshot(sectionY, section, version);
+                    snapshot.captureSection(sectionY, section);
 
-                    if (blocks != null) {
-                        var blockIndex = SectionBlockIndex.get(section, level, chunkX << 4, sectionY << 4, chunkZ << 4);
-                        if (!copySectionRows(blockIndex, blocks, chunkX << 4, sectionY << 4, chunkZ << 4,
-                                maxX, maxY, maxZ)) {
-                            blocks = null;
-                        }
-                    }
+                    var blockIndex = SectionBlockIndex.get(section, level, chunkX << 4, sectionY << 4, chunkZ << 4);
+                    copySectionRows(blockIndex, region, chunkX << 4, sectionY << 4, chunkZ << 4);
                 }
-
-                chunks[index++] = new ChunkSnapshot(chunkX, chunkZ, sections);
             }
         }
 
-        return new CachedRegion(minX, minY, minZ, maxX, maxY, maxZ, chunks, blocks);
+        return region;
     }
 
-    private static boolean copySectionRows(SectionBlockIndex blockIndex, FullBlockGrid blocks,
-            int baseX, int baseY, int baseZ, int maxX, int maxY, int maxZ) {
-        int firstX = Math.max(blocks.minX, baseX);
-        int lastX = Math.min(maxX, baseX + 15);
-        int firstY = Math.max(blocks.minY, baseY);
-        int lastY = Math.min(maxY, baseY + 15);
-        int firstZ = Math.max(blocks.minZ, baseZ);
-        int lastZ = Math.min(maxZ, baseZ + 15);
+    private static void copySectionRows(SectionBlockIndex blockIndex, BlockCollisionRegion region,
+            int baseX, int baseY, int baseZ) {
+        int firstX = Math.max(region.minX, baseX);
+        int lastX = Math.min(region.maxX, baseX + 15);
+        int firstY = Math.max(region.minY, baseY);
+        int lastY = Math.min(region.maxY, baseY + 15);
+        int firstZ = Math.max(region.minZ, baseZ);
+        int lastZ = Math.min(region.maxZ, baseZ + 15);
 
         int width = lastX - firstX + 1;
         int rangeMask = ((1 << width) - 1) << (firstX - baseX);
         int edgeMask = 0;
-        if (firstX == blocks.minX) {
+        if (firstX == region.minX) {
             edgeMask |= 1 << (firstX - baseX);
         }
-        if (lastX == maxX) {
+        if (lastX == region.maxX) {
             edgeMask |= 1 << (lastX - baseX);
         }
 
         for (int z = firstZ; z <= lastZ; z++) {
             for (int y = firstY; y <= lastY; y++) {
                 int borderAxes = 0;
-                if (y == blocks.minY || y == maxY) {
+                if (y == region.minY || y == region.maxY) {
                     borderAxes++;
                 }
-                if (z == blocks.minZ || z == maxZ) {
+                if (z == region.minZ || z == region.maxZ) {
                     borderAxes++;
                 }
 
-                int occupied = blockIndex.row(y & 15, z & 15, rangeMask & ~edgeMask, edgeMask, borderAxes);
-                if (occupied < 0) {
-                    return false;
-                }
+                int candidates = blockIndex.candidates(y & 15, z & 15, rangeMask & ~edgeMask, edgeMask, borderAxes);
+                int rowBits = (candidates >>> (firstX - baseX)) << (firstX - region.minX);
+                region.addRow(y, z, rowBits);
 
-                int rowBits = (occupied >>> (firstX - baseX)) << (firstX - blocks.minX);
-                blocks.addRow(y, z, rowBits);
+                if (blockIndex.hasSpecial(y & 15, z & 15, candidates)) {
+                    region.fullBlocksOnly = false;
+                }
             }
         }
-
-        return true;
     }
 }

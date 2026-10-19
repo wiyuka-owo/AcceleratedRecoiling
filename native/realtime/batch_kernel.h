@@ -35,6 +35,7 @@ struct Query {
     int sourceSlot;
     bool retainCollisions = true;
     bool computeImpulses = false;
+    bool candidatesOnly = false;
 };
 
 enum OutputField : int {
