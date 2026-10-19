@@ -34,8 +34,16 @@ static bool indexedSection(const Section& section, int sectionIndex, int entryCo
             }
         }
 
-        if (collisionMask & fallbackEntities[wordIndex]) {
+        std::uint64_t callbacks = collisionMask & fallbackEntities[wordIndex];
+        if (callbacks && !query.candidatesOnly) {
             return false;
+        }
+        while (callbacks) {
+            const int slot = wordIndex * 64 + std::countr_zero(callbacks);
+            callbacks &= callbacks - 1;
+            if (entityData[FLAGS * section.stride + slot] < -1) {
+                return false;
+            }
         }
 
         if constexpr (RetainCollisions) {
@@ -49,7 +57,11 @@ static bool indexedSection(const Section& section, int sectionIndex, int entryCo
             collisionCount += std::popcount(collisionMask);
         }
 
-        std::uint64_t pushMask = collisionMask & ~(section.coincident ? section.coincident[wordIndex] : 0);
+        if (query.candidatesOnly) {
+            continue;
+        }
+
+        std::uint64_t pushMask = collisionMask & ~section.coincident[wordIndex];
 
         while (pushMask) {
             const int slot = wordIndex * 64 + std::countr_zero(pushMask);
