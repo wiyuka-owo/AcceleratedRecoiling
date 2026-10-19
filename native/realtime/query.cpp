@@ -11,7 +11,7 @@ extern "C" {
 
 JNIEXPORT jint JNICALL Java_com_wiyuka_acceleratedrecoiling_natives_realtime_RealtimeNative_version(
         JNIEnv*, jclass) {
-    return 10;
+    return 11;
 }
 
 JNIEXPORT jint JNICALL Java_com_wiyuka_acceleratedrecoiling_natives_realtime_RealtimeNative_quantizationMinEntities(
@@ -40,11 +40,9 @@ JNIEXPORT jlong JNICALL Java_com_wiyuka_acceleratedrecoiling_natives_realtime_Re
     return reinterpret_cast<jlong>(env->GetDirectBufferAddress(buffer));
 }
 
-JNIEXPORT jlong JNICALL Java_com_wiyuka_acceleratedrecoiling_natives_realtime_RealtimeNative_queryBatch(
-        JNIEnv* env, jclass, jobject sectionBuffer, jint sectionCount, jobject outputBuffer,
-        jint sourceSection, jint sourceSlot, jdouble sourceX, jdouble sourceZ,
-        jdouble minX, jdouble minY, jdouble minZ, jdouble maxX, jdouble maxY, jdouble maxZ,
-        jboolean retainCollisions, jboolean computeImpulses) {
+static jlong queryBatch(
+        JNIEnv* env, jobject sectionBuffer, jint sectionCount, jobject outputBuffer,
+        const ar::Query& query) {
     const auto* sections = static_cast<const Section*>(env->GetDirectBufferAddress(sectionBuffer));
     auto* output = static_cast<std::int64_t*>(env->GetDirectBufferAddress(outputBuffer));
 
@@ -71,21 +69,33 @@ JNIEXPORT jlong JNICALL Java_com_wiyuka_acceleratedrecoiling_natives_realtime_Re
         return -2;
     }
 
-    const int outputFields = computeImpulses ? ar::OUTPUT_FIELDS : ar::PUSH_TARGETS + 1;
+    const int outputFields = query.computeImpulses ? ar::OUTPUT_FIELDS : ar::PUSH_TARGETS + 1;
     const std::int64_t requiredOutputBytes = entryCount * outputFields * sizeof(std::int64_t);
     if (requiredOutputBytes > env->GetDirectBufferCapacity(outputBuffer)) {
         return -2;
     }
 
-    ar::Query query{
-        {minX, minY, minZ, maxX, maxY, maxZ},
-        sourceX, sourceZ,
-        sourceSection, sourceSlot,
-        retainCollisions != JNI_FALSE,
-        computeImpulses != JNI_FALSE
-    };
-
     return ar::batch(batchKernel, sections, sectionCount, static_cast<int>(entryCount), output, query);
+}
+
+JNIEXPORT jlong JNICALL Java_com_wiyuka_acceleratedrecoiling_natives_realtime_RealtimeNative_queryBatch(
+        JNIEnv* env, jclass, jobject sectionBuffer, jint sectionCount, jobject outputBuffer,
+        jint sourceSection, jint sourceSlot, jdouble sourceX, jdouble sourceZ,
+        jdouble minX, jdouble minY, jdouble minZ, jdouble maxX, jdouble maxY, jdouble maxZ,
+        jboolean retainCollisions, jboolean computeImpulses) {
+    ar::Query query{{minX, minY, minZ, maxX, maxY, maxZ}, sourceX, sourceZ, sourceSection, sourceSlot};
+    query.retainCollisions = retainCollisions != JNI_FALSE;
+    query.computeImpulses = computeImpulses != JNI_FALSE;
+    return queryBatch(env, sectionBuffer, sectionCount, outputBuffer, query);
+}
+
+JNIEXPORT jlong JNICALL Java_com_wiyuka_acceleratedrecoiling_natives_realtime_RealtimeNative_queryCandidates(
+        JNIEnv* env, jclass, jobject sectionBuffer, jint sectionCount, jobject outputBuffer,
+        jint sourceSection, jint sourceSlot,
+        jdouble minX, jdouble minY, jdouble minZ, jdouble maxX, jdouble maxY, jdouble maxZ) {
+    ar::Query query{{minX, minY, minZ, maxX, maxY, maxZ}, 0.0, 0.0, sourceSection, sourceSlot};
+    query.candidatesOnly = true;
+    return queryBatch(env, sectionBuffer, sectionCount, outputBuffer, query);
 }
 
 }

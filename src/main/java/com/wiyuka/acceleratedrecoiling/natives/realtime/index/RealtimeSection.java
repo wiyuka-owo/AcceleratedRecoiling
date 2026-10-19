@@ -4,7 +4,10 @@ import com.wiyuka.acceleratedrecoiling.natives.realtime.RealtimeNative;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.compat.BatchedRules;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.BitSet;
+import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.world.entity.Entity;
@@ -14,17 +17,14 @@ import net.minecraft.world.phys.AABB;
 public final class RealtimeSection {
     private View view;
     private boolean dirty = true;
-    private boolean softKnown;
-    private int nonSoft;
+    private ArrayList<Entity> obstacles;
 
     public View currentView() {
         return view;
     }
 
     public void stateDirty(int slot) {
-        if (view != null) {
-            view.stateDirty(slot);
-        }
+        view.stateDirty(slot);
     }
 
     public void prepareBatch(long epoch) {
@@ -35,26 +35,25 @@ public final class RealtimeSection {
         view.update(slot, box);
     }
 
-    public boolean softOnly(EntitySection<?> section) {
-        if (!softKnown) {
-            nonSoft = 0;
+    public List<Entity> obstacles(EntitySection<Entity> section) {
+        if (obstacles == null) {
+            obstacles = new ArrayList<>();
             var iterator = section.getEntities().iterator();
 
             while (iterator.hasNext()) {
-                if (!BatchedRules.soft(iterator.next().getClass())) {
-                    nonSoft++;
+                var entity = iterator.next();
+                if (!BatchedRules.soft(entity.getClass())) {
+                    obstacles.add(entity);
                 }
             }
-
-            softKnown = true;
         }
 
-        return nonSoft == 0;
+        return obstacles;
     }
 
     public void added(Object object) {
-        if (softKnown && !BatchedRules.soft(object.getClass())) {
-            nonSoft++;
+        if (obstacles != null && !BatchedRules.soft(object.getClass())) {
+            obstacles.add((Entity) object);
         }
 
         if (shouldRebuildView(object)) {
@@ -70,8 +69,8 @@ public final class RealtimeSection {
     }
 
     public void removed(Object entity) {
-        if (softKnown && !BatchedRules.soft(entity.getClass())) {
-            nonSoft--;
+        if (obstacles != null && !BatchedRules.soft(entity.getClass())) {
+            obstacles.remove(entity);
         }
 
         if (!(entity instanceof IndexedEntity indexed)) {
@@ -89,18 +88,13 @@ public final class RealtimeSection {
         indexed.ar$unbindSection(this);
     }
 
-    public View view(EntitySection<?> section) {
+    public View view(EntitySection<Entity> section) {
         if (!dirty) {
             return view;
         }
 
         View previous = view;
-        View replacement = View.create(section);
-        if (replacement == null) {
-            return null;
-        }
-
-        view = replacement;
+        view = View.create(section);
         dirty = false;
         view.initialize(this, previous);
         return view;
@@ -166,8 +160,8 @@ public final class RealtimeSection {
             this.stateChanges = new BitSet(stride);
         }
 
-        private static View create(EntitySection<?> section) {
-            var entries = section.getEntities().toArray();
+        private static View create(EntitySection<Entity> section) {
+            var entries = section.getEntities().toArray(Entity[]::new);
 
             int requiredCapacity = Math.addExact(entries.length, Math.max(1, entries.length / 4));
             int stride = 16;
@@ -178,16 +172,10 @@ public final class RealtimeSection {
 
             // avoid l1 cache-set aliasing between soa planes
             if (stride >= 512) {
-                stride = Math.addExact(stride, 16);
+                stride += 16;
             }
 
-            var entities = new Entity[stride];
-            for (int slot = 0; slot < entries.length; slot++) {
-                if (!(entries[slot] instanceof Entity entity)) {
-                    return null;
-                }
-                entities[slot] = entity;
-            }
+            var entities = Arrays.copyOf(entries, stride);
 
             boolean quantized = RealtimeNative.quantizeSection(entries.length);
             int bytesPerEntity = ENTITY_FIELD_COUNT * Double.BYTES;
@@ -213,8 +201,6 @@ public final class RealtimeSection {
 
                 boolean cached = previous != null
                         && indexed.ar$section() == owner
-                        && oldSlot >= 0
-                        && oldSlot < previous.count
                         && previous.entities[oldSlot] == entities[slot];
 
                 indexed.ar$bindSection(owner, slot);
@@ -271,7 +257,7 @@ public final class RealtimeSection {
         }
 
         private boolean remove(Object entity, int slot) {
-            if (pins != 0 || slot < 0 || slot >= count || entities[slot] != entity) {
+            if (pins != 0 || entities[slot] != entity) {
                 return false;
             }
 
@@ -286,14 +272,11 @@ public final class RealtimeSection {
         }
 
         private void stateDirty(int slot) {
-            if (slot >= 0 && slot < stride) {
-                stateChanges.set(slot);
-            }
+            stateChanges.set(slot);
         }
 
         private void prepareBatch(long epoch) {
             if (policyEpoch != epoch) {
-                stateChanges.clear();
                 stateChanges.set(0, count);
                 policyEpoch = epoch;
             }
@@ -307,7 +290,7 @@ public final class RealtimeSection {
 
                 double x = entity.getX();
                 double z = entity.getZ();
-                int flag = BatchedRules.classify(entity);
+                int flag = BatchedRules.classify(entity).nativeFlag;
                 writeState(slot, x, z, flag);
             }
 

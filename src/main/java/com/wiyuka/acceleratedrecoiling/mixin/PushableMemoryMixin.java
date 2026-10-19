@@ -3,6 +3,7 @@ package com.wiyuka.acceleratedrecoiling.mixin;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.compat.BatchedRules;
+import com.wiyuka.acceleratedrecoiling.natives.realtime.CollisionResult;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.PushableMemoryEntity;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.RealtimeNative;
 import net.minecraft.world.entity.LivingEntity;
@@ -66,7 +67,7 @@ public abstract class PushableMemoryMixin implements PushableMemoryEntity {
     @Unique
     private boolean ar$rememberClimbable(LivingEntity entity, boolean climbable, long epoch) {
         ar$climbableValue = climbable;
-        ar$pushableValid = !climbable && BatchedRules.classify(entity) == BatchedRules.PUSHABLE;
+        ar$pushableValid = !climbable && BatchedRules.classify(entity) == CollisionResult.ACCEPTED;
         ar$pushableEpoch = epoch;
         return ar$climbableValue;
     }

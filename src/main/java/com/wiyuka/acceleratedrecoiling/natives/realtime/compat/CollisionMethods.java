@@ -91,7 +91,8 @@ final class CollisionMethods {
             var references = new HashMap<String, List<MethodInsnNode>>();
 
             for (var method : type.methods) {
-                if (!method.name.equals("pushable") && !method.name.equals("soft") && !method.name.equals("ladder")) {
+                if (!method.name.equals("pushable") && !method.name.equals("soft")
+                        && !method.name.equals("queryable") && !method.name.equals("obstacleSource") && !method.name.equals("ladder")) {
                     continue;
                 }
 
@@ -142,5 +143,22 @@ final class CollisionMethods {
     private static void ladder(IBlockExtension block, BlockState state, LevelReader level,
             BlockPos position, LivingEntity entity) {
         block.isLadder(state, level, position, entity);
+    }
+
+    private static void queryable(LivingEntity living, Entity entity) {
+        living.isPushable();
+        living.onClimbable();
+        living.isAlive();
+        living.getHealth();
+        entity.getTeam();
+        entity.isSpectator();
+        entity.isAlwaysTicking();
+        entity.getInBlockState();
+        entity.isPassenger();
+        entity.isVehicle();
+    }
+
+    private static void obstacleSource(Entity entity) {
+        entity.canCollideWith(entity);
     }
 }
