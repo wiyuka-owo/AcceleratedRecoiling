@@ -3,6 +3,7 @@ package com.wiyuka.acceleratedrecoiling.mixin;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.compat.BatchedRules;
+import com.wiyuka.acceleratedrecoiling.natives.realtime.compat.SableCompat;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.CollisionResult;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.PushableMemoryEntity;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.RealtimeNative;
@@ -46,7 +47,8 @@ public abstract class PushableMemoryMixin implements PushableMemoryEntity {
     @WrapOperation(method = "isPushable", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/world/entity/LivingEntity;onClimbable()Z"))
     private boolean ar$memoizedClimbable(LivingEntity entity, Operation<Boolean> original) {
-        if (!RealtimeNative.isEnabled() || NeoForgeConfig.SERVER.fullBoundingBoxLadders.get()
+        // A moving sub-level can bring a ladder to an entity without changing its block position.
+        if (SableCompat.LOADED || !RealtimeNative.isEnabled() || NeoForgeConfig.SERVER.fullBoundingBoxLadders.get()
                 || !BatchedRules.plain(entity.getClass())) {
             return original.call(entity);
         }

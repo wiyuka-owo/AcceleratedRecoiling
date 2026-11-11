@@ -3,6 +3,7 @@ package com.wiyuka.acceleratedrecoiling.natives.realtime;
 import net.neoforged.neoforge.common.NeoForgeConfig;
 import com.wiyuka.acceleratedrecoiling.mixin.RealtimeGetterAccess;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.compat.BatchedRules;
+import com.wiyuka.acceleratedrecoiling.natives.realtime.compat.SableCompat;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.index.IndexedEntity;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.index.IndexedSection;
 import com.wiyuka.acceleratedrecoiling.natives.realtime.index.RealtimeSection;
@@ -109,7 +110,8 @@ public final class BatchedCollisions {
 
     @SuppressWarnings("unchecked")
     public static boolean tryPush(LivingEntity source) {
-        if (!canPush(source)) {
+        // Sable also queries transformed bounds in intersecting sub-levels.
+        if (SableCompat.LOADED || !canPush(source)) {
             return false;
         }
 

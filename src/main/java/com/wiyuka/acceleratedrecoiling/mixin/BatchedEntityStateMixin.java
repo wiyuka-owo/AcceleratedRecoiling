@@ -2,7 +2,6 @@ package com.wiyuka.acceleratedrecoiling.mixin;
 
 import com.wiyuka.acceleratedrecoiling.natives.realtime.index.IndexedEntity;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.level.block.state.BlockState;
 import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -20,12 +19,6 @@ public class BatchedEntityStateMixin {
 
     @Inject(method = "startRiding(Lnet/minecraft/world/entity/Entity;Z)Z", at = { @At("HEAD"), @At("RETURN") })
     private void ar$mounted(CallbackInfoReturnable<Boolean> cir) {
-        ((IndexedEntity) this).ar$collisionStateDirty();
-    }
-
-    @Inject(method = "getInBlockState", at = @At(value = "FIELD", opcode = Opcodes.PUTFIELD,
-            target = "Lnet/minecraft/world/entity/Entity;inBlockState:Lnet/minecraft/world/level/block/state/BlockState;", shift = At.Shift.AFTER))
-    private void ar$blockCachePopulated(CallbackInfoReturnable<BlockState> cir) {
         ((IndexedEntity) this).ar$collisionStateDirty();
     }
 
