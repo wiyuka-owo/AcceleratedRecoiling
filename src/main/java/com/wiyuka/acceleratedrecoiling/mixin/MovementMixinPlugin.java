@@ -1,5 +1,6 @@
 package com.wiyuka.acceleratedrecoiling.mixin;
 
+import com.wiyuka.acceleratedrecoiling.natives.realtime.compat.SableCompat;
 import java.util.List;
 import java.util.Set;
 import org.objectweb.asm.tree.ClassNode;
@@ -9,6 +10,9 @@ import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
 public final class MovementMixinPlugin implements IMixinConfigPlugin {
     @Override
     public boolean shouldApplyMixin(String target, String mixin) {
+        if (mixin.endsWith(".BatchedBlockStateCacheMixin")) {
+            return !SableCompat.LOADED;
+        }
         if (mixin.endsWith(".BlockMovementMixin") || mixin.endsWith(".BlockSectionVersionMixin")
                 || mixin.endsWith(".BlockCollisionMixin") || mixin.endsWith(".BoatCollisionMixin")) {
             return Boolean.parseBoolean(System.getProperty("ar.experimental.blockMovement", "true"));

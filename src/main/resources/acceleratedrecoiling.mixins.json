@@ -12,6 +12,7 @@
     "ClimbableTagMixin",
     "ClimbableBlockMixin",
     "BatchedEntityStateMixin",
+    "BatchedBlockStateCacheMixin",
     "BatchedSyncedStateMixin",
     "BatchedScoreboardMixin",
     "BatchedLevelAccess",
